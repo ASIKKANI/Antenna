@@ -121,25 +121,16 @@ Where:
    pip install -r requirements.txt
    ```
 
-3. **Configure Settings**
-   Configure your preferred model, authorized phone number, and persona profile in `config.json` in the project root:
-   ```json
-   {
-       "selected_provider": "gemini",
-       "target_model_name": "gemini-1.5-flash",
-       "authorized_phone_number": "YOUR_PHONE_NUMBER_WITH_COUNTRY_CODE",
-       "active_persona_profile": "cybernetic"
-   }
-   ```
-   Provide your API key as an environment variable in your terminal:
+3. **Run the Interactive Setup TUI**
+   Instead of editing configuration files manually, run the interactive Terminal User Interface (TUI) setup wizard from the project root:
    ```bash
-   # Windows (CMD)
-   set GEMINI_API_KEY=your-api-key-here
-   # Windows (PowerShell)
-   $env:GEMINI_API_KEY="your-api-key-here"
-   # macOS/Linux
-   export GEMINI_API_KEY="your-api-key-here"
+   .\backend\venv\Scripts\python.exe setup_tui.py
    ```
+   The wizard allows you to:
+   - **🧠 Configure LLM Routing**: Select your primary provider (Gemini, OpenRouter, Grok, Nvidia, Ollama), enter API keys (written securely to a local `.env`), and set fallback models.
+   - **📱 Link WhatsApp**: Check Docker status, spin up/stop the WhatsApp gateway container, and stream logs directly in the terminal to scan the QR code.
+   - **⚙️ Customize Settings**: Modify authorized phone numbers, select active persona profiles (`cybernetic`, `rival`, `zen`), and change foreground window polling frequency.
+   - **🚀 Diagnostic Checks**: Run health tests to verify config validity, API keys presence, and backend service reachability.
 
 ---
 

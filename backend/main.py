@@ -33,6 +33,10 @@ from sentinel import (
     evaluate_window_compliance,
 )
 from turbovec import memory_db
+from dotenv import load_dotenv
+
+# Load environment variables from the root .env file
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # ─── Logging ──────────────────────────────────────────────────────
 logging.basicConfig(
