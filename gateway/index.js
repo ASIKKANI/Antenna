@@ -91,12 +91,13 @@ function startListening(client) {
       const senderRaw = message.from || message.sender?.id || "";
       const senderPhone = senderRaw.replace("@c.us", "").replace("@s.whatsapp.net", "");
 
-      // For outgoing messages sent by the bot itself, skip processing
-      if (message.fromMe) {
+      // Log immediately so we see all traffic
+      console.log(`[RECEIVED] Message from ${senderPhone}: "${message.body || ""}" (fromMe: ${!!message.fromMe}, Type: ${message.type})`);
+
+      // For outgoing messages sent by the bot itself, skip processing (unless it is a message to self)
+      if (message.fromMe && message.to !== message.from) {
         return;
       }
-
-      console.log(`[RECEIVED] Message from ${senderPhone}: "${message.body || ""}" (Type: ${message.type})`);
 
       // Security: drop unauthorized senders (PRD Req-A.2)
       if (senderPhone !== AUTHORIZED_PHONE) {
