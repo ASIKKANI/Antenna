@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────
+# ChronosPet — Docker Compose
+# ─────────────────────────────────────────────────────────────────
+# Services:
+#   1. openwa   — WhatsApp gateway (OpenWA wa-automate)
+#   2. backend  — FastAPI orchestration engine (optional, for full containerized mode)
+#
+# Quick Start:
+#   docker-compose up openwa        # Gateway only (backend runs locally)
+#   docker-compose up               # Full stack
+#
+# First launch: scan the QR code from the openwa container logs.
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  # ── OpenWA WhatsApp Gateway ──────────────────────────────────
+  openwa:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: chronospet-openwa
+    ports:
+      - "8080:8080"
+    environment:
+      - BACKEND_WEBHOOK_URL=http://host.docker.internal:8000/api/v1/webhook/ingest
+      - AUTHORIZED_PHONE=919876543210
+    volumes:
+      # Persist WhatsApp session so QR only needs to be scanned once
+      - openwa_session:/app/session
+    init: true
+    restart: unless-stopped
+
+  # ── FastAPI Backend (optional containerized mode) ────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chronospet-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - backend_chroma:/app/chroma_data
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - openwa
+    restart: unless-stopped
+
+volumes:
+  openwa_session:
+  backend_chroma:

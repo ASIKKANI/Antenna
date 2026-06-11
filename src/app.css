@@ -1,0 +1,258 @@
+/* ═══════════════════════════════════════════════════════════════
+   ChronosPet — Design System
+   Premium glassmorphism overlay with neon accents
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Custom Properties ───────────────────────────────────── */
+:root {
+  /* Core palette */
+  --cp-bg-glass: rgba(10, 12, 28, 0.75);
+  --cp-bg-panel: rgba(15, 23, 42, 0.95);
+  --cp-bg-input: rgba(20, 24, 55, 0.6);
+
+  /* Accent colors */
+  --cp-accent: #6366f1;         /* Indigo */
+  --cp-accent-glow: #818cf8;
+  --cp-accent-warm: #f59e0b;    /* Amber for warnings */
+  --cp-accent-danger: #ef4444;  /* Red for critical */
+  --cp-accent-success: #10b981; /* Emerald for success */
+  --cp-accent-xp: #a78bfa;     /* Violet for XP */
+
+  /* Text */
+  --cp-text-primary: #e2e8f0;
+  --cp-text-secondary: #94a3b8;
+  --cp-text-muted: #64748b;
+  --cp-text-accent: #a5b4fc;
+
+  /* Borders */
+  --cp-border: rgba(99, 102, 241, 0.2);
+  --cp-border-active: rgba(99, 102, 241, 0.5);
+
+  /* Shadows */
+  --cp-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --cp-shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+
+  /* Typography */
+  --cp-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --cp-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Sizing */
+  --cp-radius: 16px;
+  --cp-radius-sm: 10px;
+  --cp-radius-xs: 6px;
+}
+
+/* ─── Base Reset ──────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--cp-font-sans);
+  color: var(--cp-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+/* ─── Glassmorphism Panel ─────────────────────────────────────── */
+.glass-panel {
+  background: var(--cp-bg-glass);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius);
+  box-shadow: var(--cp-shadow), var(--cp-shadow-glow);
+}
+
+.glass-panel-solid {
+  background: var(--cp-bg-panel);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-sm);
+  box-shadow: var(--cp-shadow);
+}
+
+/* ─── Avatar Animations ──────────────────────────────────────── */
+
+/* Idle: gentle floating bob */
+@keyframes avatar-idle {
+  0%, 100% { transform: translateY(0px) scale(1); }
+  50% { transform: translateY(-8px) scale(1.02); }
+}
+
+/* Focused: steady pulse with visor glow */
+@keyframes avatar-focused {
+  0%, 100% { 
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px var(--cp-accent));
+  }
+  50% { 
+    transform: scale(1.03);
+    filter: drop-shadow(0 0 16px var(--cp-accent-glow));
+  }
+}
+
+/* Warning: orange pulsing shake */
+@keyframes avatar-warning {
+  0%, 100% { transform: translateX(0) scale(1); }
+  10% { transform: translateX(-3px) scale(1.02); }
+  20% { transform: translateX(3px) scale(1.02); }
+  30% { transform: translateX(-2px) scale(1.01); }
+  40% { transform: translateX(2px) scale(1.01); }
+  50%, 100% { transform: translateX(0) scale(1); }
+}
+
+/* Critical: aggressive red shake */
+@keyframes avatar-critical {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  10% { transform: translateX(-6px) rotate(-2deg); }
+  20% { transform: translateX(6px) rotate(2deg); }
+  30% { transform: translateX(-4px) rotate(-1deg); }
+  40% { transform: translateX(4px) rotate(1deg); }
+  50% { transform: translateX(-2px); }
+  60% { transform: translateX(2px); }
+}
+
+/* Celebrating: bounce with confetti pulse */
+@keyframes avatar-celebrate {
+  0% { transform: scale(1) translateY(0); }
+  15% { transform: scale(1.15) translateY(-20px); }
+  30% { transform: scale(0.95) translateY(0); }
+  45% { transform: scale(1.08) translateY(-10px); }
+  60% { transform: scale(1) translateY(0); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+/* Glowing ring behind avatar */
+@keyframes ring-pulse {
+  0%, 100% { 
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% { 
+    transform: scale(1.15);
+    opacity: 0.6;
+  }
+}
+
+/* ─── Typewriter Effect ──────────────────────────────────────── */
+@keyframes typewriter-blink {
+  0%, 50% { border-color: var(--cp-text-accent); }
+  51%, 100% { border-color: transparent; }
+}
+
+/* ─── XP Bar Shimmer ─────────────────────────────────────────── */
+@keyframes xp-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.xp-bar-fill {
+  background: linear-gradient(
+    90deg,
+    var(--cp-accent) 0%,
+    var(--cp-accent-glow) 40%,
+    #c4b5fd 50%,
+    var(--cp-accent-glow) 60%,
+    var(--cp-accent) 100%
+  );
+  background-size: 200% 100%;
+  animation: xp-shimmer 3s ease-in-out infinite;
+}
+
+/* ─── Status Dot Pulse ───────────────────────────────────────── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+/* ─── Dialogue Bubble ────────────────────────────────────────── */
+.dialogue-bubble {
+  position: relative;
+  background: var(--cp-bg-input);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-sm);
+  padding: 10px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cp-text-primary);
+  max-width: 100%;
+  word-wrap: break-word;
+}
+
+.dialogue-bubble::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 10px;
+  height: 10px;
+  background: var(--cp-bg-input);
+  border-left: 1px solid var(--cp-border);
+  border-top: 1px solid var(--cp-border);
+}
+
+/* ─── Task Priority Badges ───────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--cp-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-critical { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+.badge-high { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+.badge-medium { background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); }
+.badge-low { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+/* ─── Evolution Stage Colors ─────────────────────────────────── */
+.evo-drone { --evo-color: #94a3b8; }
+.evo-scout { --evo-color: #6366f1; }
+.evo-sentinel { --evo-color: #8b5cf6; }
+.evo-guardian { --evo-color: #f59e0b; }
+.evo-titan { --evo-color: #ef4444; }
+
+/* ─── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--cp-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cp-border-active);
+}
+
+/* ─── Focus Ring Override ────────────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid var(--cp-accent);
+  outline-offset: 2px;
+  border-radius: var(--cp-radius-xs);
+}
+
+/* ─── Transitions ────────────────────────────────────────────── */
+.transition-smooth {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.transition-bounce {
+  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}

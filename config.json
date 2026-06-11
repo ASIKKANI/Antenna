@@ -1,0 +1,17 @@
+{
+    "selected_provider": "gemini",
+    "target_model_name": "gemini-1.5-flash",
+    "active_persona_profile": "cybernetic",
+    "polling_frequency_seconds": 30,
+    "authorized_phone_number": "919876543210",
+    "gamification_level": 1,
+    "accumulated_experience": 0,
+    "llm_fallback_models": [
+        "gemini/gemini-1.5-flash",
+        "openrouter/google/gemini-flash-1.5",
+        "ollama/gemma2"
+    ],
+    "openwa_gateway_url": "http://localhost:8080",
+    "xp_per_task_completion": 50,
+    "xp_level_thresholds": [0, 100, 300, 600, 1000, 1500, 2200, 3000, 4000, 5500]
+}

@@ -1,0 +1,40 @@
+{
+  "productName": "ChronosPet",
+  "version": "1.0.0",
+  "identifier": "com.chronospet.dev",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ChronosPet",
+        "width": 360,
+        "height": 250,
+        "x": null,
+        "y": null,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": true,
+        "skipTaskbar": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/icon.ico"
+    ]
+  }
+}
