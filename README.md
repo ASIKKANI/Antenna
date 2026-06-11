@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./chronospet_logo.png" alt="ChronosPet Logo" width="180" style="border-radius: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+  <img src="./chronospet_logo_v2.png" alt="ChronosPet Logo" width="180" style="border-radius: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
 </p>
 
 <h1 align="center">ChronosPet</h1>
