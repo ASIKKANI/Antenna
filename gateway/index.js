@@ -37,6 +37,7 @@ create({
   authTimeout: 120,
   cacheEnabled: false,
   useChrome: true,
+  customUserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
   killProcessOnBrowserClose: true,
   throwErrorOnTosBlock: false,
   chromiumArgs: [
@@ -46,6 +47,8 @@ create({
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--disable-gpu",
+    "--disable-blink-features=AutomationControlled",
+    "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
   ],
 })
   .then((client) => startListening(client))
