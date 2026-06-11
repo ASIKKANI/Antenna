@@ -128,7 +128,7 @@ Where:
    ```
    The wizard allows you to:
    - **🧠 Configure LLM Routing**: Select your primary provider (Gemini, OpenRouter, Grok, Nvidia, Ollama), enter API keys (written securely to a local `.env`), and set fallback models.
-   - **📱 Link WhatsApp**: Check Docker status, spin up/stop the WhatsApp gateway container, and stream logs directly in the terminal to scan the QR code.
+   - **📱 Link WhatsApp**: Link your device by running the gateway natively via Node.js (recommended, no Docker/virtualization required) or using a Docker container.
    - **⚙️ Customize Settings**: Modify authorized phone numbers, select active persona profiles (`cybernetic`, `rival`, `zen`), and change foreground window polling frequency.
    - **🚀 Diagnostic Checks**: Run health tests to verify config validity, API keys presence, and backend service reachability.
 

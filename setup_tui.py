@@ -110,7 +110,6 @@ def is_docker_running():
         return False
 
 def run_compose_cmd(args):
-    # Try 'docker compose' first, fallback to 'docker-compose'
     try:
         subprocess.run(["docker", "compose"] + args, check=True, capture_output=True)
         return True
@@ -128,11 +127,68 @@ def is_openwa_running():
     except Exception:
         return False
 
-def handle_whatsapp():
+def is_native_gateway_running():
+    try:
+        if os.name == "nt":
+            res = subprocess.run(
+                ["powershell", "-Command", "Get-WmiObject Win32_Process -Filter \"name='node.exe'\" | Select-Object -ExpandProperty CommandLine"],
+                capture_output=True, text=True
+            )
+            return "index.js" in res.stdout
+        else:
+            res = subprocess.run(["pgrep", "-f", "node.*index.js"], capture_output=True)
+            return res.returncode == 0
+    except Exception:
+        return False
+
+def run_native_whatsapp(config):
     clear_terminal()
     print_banner()
-    console.print("[bold yellow]📱 WhatsApp Gateway Connector[/bold yellow]\n")
+    console.print("[bold yellow]🟢 Run WhatsApp Gateway Natively[/bold yellow]\n")
 
+    gateway_path = Path("gateway")
+    node_modules_path = gateway_path / "node_modules"
+
+    if not node_modules_path.exists():
+        console.print("[cyan]Installing Node.js dependencies for WhatsApp Gateway (first-time setup)...[/cyan]")
+        try:
+            subprocess.run(["npm", "install"], cwd=str(gateway_path), check=True, shell=True)
+            console.print("[green]✔ Dependencies installed successfully![/green]\n")
+        except Exception as e:
+            console.print(f"[bold red]Failed to install dependencies: {e}[/bold red]")
+            questionary.press_any_key_to_continue().ask()
+            return
+
+    console.print("[cyan]Starting WhatsApp client... (Press Ctrl+C to stop and return to menu)[/cyan]")
+    console.print("[dim]Generating QR code in terminal... Scan it with your phone's WhatsApp Link Devices feature.[/dim]\n")
+
+    env = os.environ.copy()
+    env["AUTHORIZED_PHONE"] = config.get("authorized_phone_number", "919876543210")
+    env["BACKEND_WEBHOOK_URL"] = "http://localhost:8000/api/v1/webhook/ingest"
+
+    try:
+        # Spawn node index.js
+        process = subprocess.Popen(
+            ["node", "index.js"],
+            cwd=str(gateway_path),
+            env=env,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            shell=True
+        )
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        console.print("\n[cyan]Stopping WhatsApp Gateway...[/cyan]")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        console.print("[green]✔ Gateway stopped.[/green]")
+        time.sleep(1.5)
+
+def run_docker_whatsapp():
     if not is_docker_running():
         console.print("[bold red]❌ Docker is not running or not installed.[/bold red]")
         console.print("Please make sure Docker Desktop is started and running, then try again.\n")
@@ -141,13 +197,13 @@ def handle_whatsapp():
 
     running = is_openwa_running()
     status_str = "[green]Running[/green]" if running else "[red]Stopped[/red]"
-    console.print(f"Current Gateway Status: {status_str}\n")
+    console.print(f"Current Container Status: {status_str}\n")
 
     actions = [
-        "🟢 Start WhatsApp Gateway",
-        "🛑 Stop WhatsApp Gateway",
-        "📋 View Logs & Scan QR Code",
-        "🔙 Back to Main Menu"
+        "🟢 Start WhatsApp Gateway Container",
+        "🛑 Stop WhatsApp Gateway Container",
+        "📋 View Container Logs & Scan QR Code",
+        "🔙 Back"
     ]
 
     choice = questionary.select(
@@ -161,7 +217,6 @@ def handle_whatsapp():
         if success:
             console.print("[green]✔ Container started successfully![/green]")
             time.sleep(1)
-            # Auto go to logs to scan QR code
             view_logs()
         else:
             console.print("[bold red]Failed to start container. Make sure docker-compose.yml exists and is valid.[/bold red]")
@@ -178,6 +233,41 @@ def handle_whatsapp():
 
     elif choice == actions[2]:
         view_logs()
+
+def handle_whatsapp():
+    clear_terminal()
+    print_banner()
+    console.print("[bold yellow]📱 WhatsApp Gateway Connector[/bold yellow]\n")
+
+    config = load_config()
+    
+    docker_active = is_openwa_running()
+    native_active = is_native_gateway_running()
+    
+    if docker_active:
+        status_str = "[green]Running via Docker[/green]"
+    elif native_active:
+        status_str = "[green]Running Natively (Node.js)[/green]"
+    else:
+        status_str = "[red]Stopped[/red]"
+        
+    console.print(f"Current Gateway Status: {status_str}\n")
+
+    choices = [
+        "🟢 Run Natively via Node.js (Safe, Recommended — No Docker needed)",
+        "🐳 Run via Docker Container (Requires Docker Desktop)",
+        "🔙 Back to Main Menu"
+    ]
+
+    choice = questionary.select(
+        "Select gateway run mode:",
+        choices=choices
+    ).ask()
+
+    if choice == choices[0]:
+        run_native_whatsapp(config)
+    elif choice == choices[1]:
+        run_docker_whatsapp()
 
 def view_logs():
     clear_terminal()
@@ -198,6 +288,7 @@ def view_logs():
             questionary.press_any_key_to_continue().ask()
     except KeyboardInterrupt:
         pass
+
 
 # ─── LLM Routing Module ───────────────────────────────────────────
 def handle_llm():
@@ -366,12 +457,16 @@ def run_diagnostics():
     except httpx.RequestError:
         table.add_row("FastAPI Backend", "Service offline (Not listening on port 8000)", "[yellow]OFFLINE[/yellow]")
 
-    # 5. WhatsApp Gateway Server Status (port 8080)
-    try:
-        res = httpx.get("http://localhost:8080/", timeout=1.5)
-        table.add_row("WhatsApp Gateway", f"Active (Reachable)", "[green]OK[/green]")
-    except httpx.RequestError:
-        table.add_row("WhatsApp Gateway", "Gateway offline (Port 8080 unreachable)", "[yellow]OFFLINE[/yellow]")
+    # 5. WhatsApp Gateway Status (Docker or Native Process)
+    is_docker_wa = is_openwa_running()
+    is_native_wa = is_native_gateway_running()
+    
+    if is_docker_wa:
+        table.add_row("WhatsApp Gateway", "Running (Docker Container)", "[green]OK[/green]")
+    elif is_native_wa:
+        table.add_row("WhatsApp Gateway", "Running (Native Node.js)", "[green]OK[/green]")
+    else:
+        table.add_row("WhatsApp Gateway", "Offline", "[yellow]OFFLINE[/yellow]")
 
     console.print(table)
     console.print("\n")
