@@ -32,11 +32,13 @@ console.log(`Authorized Phone: ${AUTHORIZED_PHONE}`);
 create({
   sessionId: "chronospet",
   sessionDataPath: "./session",
-  headless: false,
+  headless: true,
   qrTimeout: 0,            // Wait indefinitely for QR scan
   authTimeout: 120,
   cacheEnabled: false,
   useChrome: true,
+  inDocker: true,
+  userDataDir: "./session/_IGNORE_chronospet",
   customUserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
   killProcessOnBrowserClose: true,
   throwErrorOnTosBlock: false,
