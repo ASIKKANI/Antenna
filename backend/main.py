@@ -24,6 +24,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 
 from litellm import Router as LiteLLMRouter
+from turbovec import memory_db
 from models import (
     TaskEntity, TaskUpdatePayload, WebhookPayload,
     UserConfigSchema, CompanionState, LLMParsedTask,
@@ -34,7 +35,6 @@ from sentinel import (
     extract_browser_context,
 )
 from vision_analyzer import capture_screen, analyze_screen, analyze_screen_local_ocr, VisionResult, vision_cache
-from turbovec import memory_db
 from dotenv import load_dotenv
 
 # Load environment variables from the root .env file
