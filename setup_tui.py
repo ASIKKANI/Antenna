@@ -104,25 +104,26 @@ def set_env_var(key, value):
 # ─── WhatsApp Module ──────────────────────────────────────────────
 def is_docker_running():
     try:
-        subprocess.run(["docker", "info"], capture_output=True, check=True)
+        # 1-second timeout prevents hanging if Docker Desktop is offline
+        subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=1.0)
         return True
     except Exception:
         return False
 
 def run_compose_cmd(args):
     try:
-        subprocess.run(["docker", "compose"] + args, check=True, capture_output=True)
+        subprocess.run(["docker", "compose"] + args, check=True, capture_output=True, timeout=5.0)
         return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         try:
-            subprocess.run(["docker-compose"] + args, check=True, capture_output=True)
+            subprocess.run(["docker-compose"] + args, check=True, capture_output=True, timeout=5.0)
             return True
         except Exception:
             return False
 
 def is_openwa_running():
     try:
-        res = subprocess.run(["docker", "ps", "--filter", "name=chronospet-openwa", "--format", "{{.Status}}"], capture_output=True, text=True, check=True)
+        res = subprocess.run(["docker", "ps", "--filter", "name=chronospet-openwa", "--format", "{{.Status}}"], capture_output=True, text=True, check=True, timeout=1.0)
         return "Up" in res.stdout
     except Exception:
         return False
@@ -130,21 +131,29 @@ def is_openwa_running():
 def is_native_gateway_running():
     try:
         if os.name == "nt":
+            # Quick check if node.exe is even running using tasklist (under 50ms)
+            try:
+                res_tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq node.exe"], capture_output=True, text=True, timeout=1.0)
+                if "node.exe" not in res_tl.stdout:
+                    return False
+            except Exception:
+                pass
+
             # wmic is extremely fast (under 100ms) compared to launching powershell.exe
             res = subprocess.run(
                 ["wmic", "process", "where", "name='node.exe'", "get", "commandline"],
-                capture_output=True, text=True, shell=True
+                capture_output=True, text=True, shell=True, timeout=1.0
             )
             if "index.js" in res.stdout:
                 return True
             # Fallback in case wmic is disabled/missing
             res_ps = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", "Get-WmiObject Win32_Process -Filter \"name='node.exe'\" | Select-Object -ExpandProperty CommandLine"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=2.0
             )
             return "index.js" in res_ps.stdout
         else:
-            res = subprocess.run(["pgrep", "-f", "node.*index.js"], capture_output=True)
+            res = subprocess.run(["pgrep", "-f", "node.*index.js"], capture_output=True, timeout=1.0)
             return res.returncode == 0
     except Exception:
         return False
