@@ -32,7 +32,7 @@ console.log(`Authorized Phone: ${AUTHORIZED_PHONE}`);
 create({
   sessionId: "chronospet",
   sessionDataPath: "./session",
-  headless: true,
+  headless: false,
   qrTimeout: 0,            // Wait indefinitely for QR scan
   authTimeout: 120,
   cacheEnabled: false,
