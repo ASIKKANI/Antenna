@@ -336,11 +336,12 @@ async def process_sentinel_loop():
     logger.info("Sentinel loop started.")
     try:
         while True:
+            # Always fetch window title at the top so it's available in all branches
+            window_title = get_active_window_title() or "Unknown"
             active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
 
             if active_tasks:
                 current_time = int(time.time())
-                window_title = get_active_window_title() or "Unknown"
 
                 # Use the most recent active task
                 active_task = active_tasks[-1]
@@ -402,7 +403,12 @@ async def process_sentinel_loop():
 
                 await manager.broadcast_state(state)
             else:
-                # No active tasks — idle state
+                # No active tasks — log idle window + broadcast idle state
+                try:
+                    log_activity(window_title, 0.3, 0.0, "(idle — no active task)")
+                except Exception as ex:
+                    logger.error(f"Failed to log idle ambient activity: {ex}")
+
                 await manager.broadcast_state(
                     build_companion_state(
                         animation="idle_loop",
@@ -415,9 +421,56 @@ async def process_sentinel_loop():
         logger.info("Sentinel loop terminated.")
 
 
+def load_tasks_from_vector_db():
+    """Load all task vectors from ChromaDB into the in-memory database on startup."""
+    if not memory_db.is_ready:
+        logger.warning("ChromaDB not ready, skipping task loading.")
+        return
+    
+    try:
+        results = memory_db.collection.get()
+        ids = results.get("ids", [])
+        documents = results.get("documents", [])
+        metadatas = results.get("metadatas", [])
+        
+        count = 0
+        for idx in range(len(ids)):
+            task_id = ids[idx]
+            raw_text = documents[idx]
+            meta = metadatas[idx] or {}
+            
+            created_at_val = meta.get("created_at") or time.time()
+            resolved_at_val = meta.get("resolved_at")
+            
+            created_at_dt = datetime.fromtimestamp(float(created_at_val))
+            resolved_at_dt = datetime.fromtimestamp(float(resolved_at_val)) if resolved_at_val else None
+            
+            # Retrieve status: if not present, default to pending
+            status_val = meta.get("status_state", "pending")
+            
+            task = TaskEntity(
+                task_id=task_id,
+                raw_source_text=raw_text,
+                clean_title=meta.get("clean_title", "Untitled Task"),
+                deadline_epoch=int(meta.get("deadline", time.time() + 3600)),
+                priority_level=meta.get("priority", "medium"),
+                status_state=status_val,
+                created_at=created_at_dt,
+                resolved_at=resolved_at_dt
+            )
+            db_tasks[task_id] = task
+            count += 1
+        logger.info(f"Loaded {count} task(s) from ChromaDB vector storage.")
+    except Exception as e:
+        logger.error(f"Failed to load tasks from ChromaDB: {e}")
+
+
 # ─── Application Lifespan ────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Load existing tasks from ChromaDB vector database
+    load_tasks_from_vector_db()
+
     sentinel_task = asyncio.create_task(process_sentinel_loop())
     logger.info("━━━ ChronosPet Backend Online ━━━")
     yield
@@ -492,6 +545,24 @@ async def ingest_webhook(payload: WebhookPayload):
             task.status_state = "completed"
             task.resolved_at = datetime.utcnow()
             award_xp(system_config.xp_per_task_completion)
+
+            # Update ChromaDB vector metadata
+            try:
+                resolved_ts = task.resolved_at.timestamp() if task.resolved_at else None
+                memory_db.embed_and_store(
+                    text=task.raw_source_text,
+                    metadata={
+                        "task_id": task.task_id,
+                        "clean_title": task.clean_title,
+                        "deadline": task.deadline_epoch,
+                        "priority": task.priority_level,
+                        "status_state": task.status_state,
+                        "created_at": task.created_at.timestamp(),
+                        "resolved_at": resolved_ts,
+                    }
+                )
+            except Exception as ex:
+                logger.error(f"Failed to update task vector on completion webhook: {ex}")
 
             await manager.broadcast_state(
                 build_companion_state(
@@ -568,6 +639,8 @@ async def ingest_webhook(payload: WebhookPayload):
             "clean_title": new_task.clean_title,
             "deadline": new_task.deadline_epoch,
             "priority": new_task.priority_level,
+            "status_state": new_task.status_state,
+            "created_at": new_task.created_at.timestamp(),
         }
     )
 
@@ -638,6 +711,24 @@ async def update_task(task_id: str, update: TaskUpdatePayload):
             )
         )
 
+    # Update in ChromaDB vector memory
+    try:
+        resolved_ts = task.resolved_at.timestamp() if task.resolved_at else None
+        memory_db.embed_and_store(
+            text=task.raw_source_text,
+            metadata={
+                "task_id": task.task_id,
+                "clean_title": task.clean_title,
+                "deadline": task.deadline_epoch,
+                "priority": task.priority_level,
+                "status_state": task.status_state,
+                "created_at": task.created_at.timestamp(),
+                "resolved_at": resolved_ts,
+            }
+        )
+    except Exception as ex:
+        logger.error(f"Failed to update task vector on API update: {ex}")
+
     return {"message": "Task updated", "task": task.model_dump()}
 
 
@@ -691,6 +782,50 @@ async def search_memory(q: str, top_k: int = 5):
     """Semantic search over task history (PRD Req-C.3)."""
     results = memory_db.query(q, top_k=top_k)
     return {"query": q, "results": results}
+
+
+# ─── Debug / Observability Endpoints ─────────────────────────────
+@app.post("/api/v1/debug/sentinel-poll")
+async def force_sentinel_poll():
+    """Force an immediate sentinel window-check and activity log write. Useful for testing without waiting for the poll interval."""
+    window_title = get_active_window_title() or "Unknown"
+    active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
+
+    if active_tasks:
+        active_task = active_tasks[-1]
+        current_time = int(time.time())
+        elapsed = current_time - int(active_task.created_at.timestamp())
+        total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
+        d_weight = evaluate_window_compliance(window_title, active_task.clean_title)
+        eta = calculate_productivity_index()
+        alpha, beta, gamma_w = PERSONA_WEIGHTS.get(system_config.active_persona_profile, (0.4, 0.4, 0.2))
+        sp_score = calculate_severity_index(elapsed, total_alloc, d_weight, eta, alpha=alpha, beta=beta, gamma=gamma_w)
+        log_activity(window_title, d_weight, sp_score, active_task.clean_title)
+        return {
+            "window": window_title,
+            "active_task": active_task.clean_title,
+            "d_weight": d_weight,
+            "sp_score": sp_score,
+            "logged": True,
+        }
+    else:
+        log_activity(window_title, 0.3, 0.0, "(idle — no active task)")
+        return {"window": window_title, "active_task": None, "logged": True}
+
+
+@app.get("/api/v1/debug/activity-log")
+async def get_activity_log(lines: int = 50):
+    """Return last N lines of the ambient activity log for quick inspection."""
+    log_path = Path(__file__).parent.parent / "logs" / "activity.log"
+    if not log_path.exists():
+        return {"exists": False, "lines": []}
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-lines:]
+        return {"exists": True, "total_lines": len(all_lines), "lines": [l.rstrip() for l in tail]}
+    except Exception as e:
+        return {"exists": True, "error": str(e), "lines": []}
 
 
 # ─── Vision Trigger (PRD Section 8.2) ────────────────────────────
