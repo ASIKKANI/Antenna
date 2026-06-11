@@ -162,8 +162,9 @@ def run_native_whatsapp(config):
     console.print("[cyan]Starting WhatsApp client... (Press Ctrl+C to stop and return to menu)[/cyan]")
     console.print("[dim]Generating QR code in terminal... Scan it with your phone's WhatsApp Link Devices feature.[/dim]\n")
 
-    env = os.environ.copy()
-    env["AUTHORIZED_PHONE"] = config.get("authorized_phone_number", "919876543210")
+    # Sanitize environment dict: cast keys/values to strings and filter out any None values
+    env = {str(k): str(v) for k, v in os.environ.items() if v is not None}
+    env["AUTHORIZED_PHONE"] = str(config.get("authorized_phone_number", "919876543210"))
     env["BACKEND_WEBHOOK_URL"] = "http://localhost:8000/api/v1/webhook/ingest"
 
     try:
