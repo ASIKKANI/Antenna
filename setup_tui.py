@@ -130,11 +130,19 @@ def is_openwa_running():
 def is_native_gateway_running():
     try:
         if os.name == "nt":
+            # wmic is extremely fast (under 100ms) compared to launching powershell.exe
             res = subprocess.run(
-                ["powershell", "-Command", "Get-WmiObject Win32_Process -Filter \"name='node.exe'\" | Select-Object -ExpandProperty CommandLine"],
+                ["wmic", "process", "where", "name='node.exe'", "get", "commandline"],
+                capture_output=True, text=True, shell=True
+            )
+            if "index.js" in res.stdout:
+                return True
+            # Fallback in case wmic is disabled/missing
+            res_ps = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-WmiObject Win32_Process -Filter \"name='node.exe'\" | Select-Object -ExpandProperty CommandLine"],
                 capture_output=True, text=True
             )
-            return "index.js" in res.stdout
+            return "index.js" in res_ps.stdout
         else:
             res = subprocess.run(["pgrep", "-f", "node.*index.js"], capture_output=True)
             return res.returncode == 0
@@ -242,18 +250,6 @@ def handle_whatsapp():
 
     config = load_config()
     
-    docker_active = is_openwa_running()
-    native_active = is_native_gateway_running()
-    
-    if docker_active:
-        status_str = "[green]Running via Docker[/green]"
-    elif native_active:
-        status_str = "[green]Running Natively (Node.js)[/green]"
-    else:
-        status_str = "[red]Stopped[/red]"
-        
-    console.print(f"Current Gateway Status: {status_str}\n")
-
     choices = [
         "🟢 Run Natively via Node.js (Safe, Recommended — No Docker needed)",
         "🐳 Run via Docker Container (Requires Docker Desktop)",
@@ -264,6 +260,7 @@ def handle_whatsapp():
         "Select gateway run mode:",
         choices=choices
     ).ask()
+
 
     if choice == choices[0]:
         run_native_whatsapp(config)

@@ -2,18 +2,15 @@
 node_modules/
 .pnp.*
 .yarn/
-
 # ─── Build Output ─────────────────────────────────────────────
 dist/
 build/
 *.msi
 *.dmg
 *.AppImage
-
 # ─── Rust / Tauri ─────────────────────────────────────────────
 src-tauri/target/
 **/*.rs.bk
-
 # ─── Python ───────────────────────────────────────────────────
 backend/venv/
 backend/__pycache__/
@@ -22,17 +19,13 @@ backend/**/__pycache__/
 *.pyo
 *.egg-info/
 .eggs/
-
 # ─── ChromaDB Data ────────────────────────────────────────────
 backend/chroma_data/
-
 # ─── OpenWA Gateway ──────────────────────────────────────────
 gateway/node_modules/
 gateway/session/
-
 # ─── Docker ───────────────────────────────────────────────────
 .docker/
-
 # ─── IDE / Editor ─────────────────────────────────────────────
 .vscode/
 .idea/
@@ -41,14 +34,18 @@ gateway/session/
 *~
 .DS_Store
 Thumbs.db
-
 # ─── Environment & Secrets ────────────────────────────────────
 .env
 .env.local
 .env.production
 *.key
 *.pem
-
 # ─── Logs ─────────────────────────────────────────────────────
 *.log
 npm-debug.log*
+
+# managed
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed
