@@ -260,6 +260,73 @@ PERSONA_WEIGHTS = {
 }
 
 
+# ─── Ambient Activity Logger ─────────────────────────────────────
+def log_activity(window_title: str, d_weight: float, sp_score: float, task_title: str):
+    # Map d_weight to compliance state
+    if d_weight >= 0.9:
+        status_symbol = "🔴 DISTRACTED"
+    elif d_weight <= 0.05:
+        status_symbol = "🟢 FOCUSED"
+    else:
+        status_symbol = "🟡 NEUTRAL"
+
+    # Derive a simplified activity category / explanation
+    title_lower = window_title.lower()
+    activity = "Using Unknown Application"
+    
+    if "youtube" in title_lower:
+        activity = "Watching YouTube 📺"
+    elif "netflix" in title_lower:
+        activity = "Watching Netflix 🎬"
+    elif "discord" in title_lower:
+        activity = "Chatting on Discord 💬"
+    elif "game" in title_lower or "steam" in title_lower or any(g in title_lower for g in ["elden ring", "cyberpunk", "valorant", "minecraft", "fortnite"]):
+        activity = "Gaming / Playing Games 🎮"
+    elif "spotify" in title_lower:
+        activity = "Listening to Spotify 🎵"
+    elif "antigravity" in title_lower:
+        activity = "Coding with Antigravity IDE 🤖"
+    elif "visual studio" in title_lower or "vs code" in title_lower or "vscode" in title_lower:
+        activity = "Coding in VS Code 💻"
+    elif "pycharm" in title_lower or "intellij" in title_lower or "webstorm" in title_lower:
+        activity = "Coding in JetBrains IDE 💻"
+    elif "terminal" in title_lower or "cmd" in title_lower or "powershell" in title_lower or "bash" in title_lower:
+        activity = "Working in Terminal ⌨️"
+    elif "github" in title_lower or "gitlab" in title_lower:
+        activity = "Browsing Code Repositories on GitHub/GitLab 🐙"
+    elif "chrome" in title_lower or "firefox" in title_lower or "edge" in title_lower or "opera" in title_lower:
+        activity = "Browsing the Web 🌐"
+    elif "notion" in title_lower or "obsidian" in title_lower or "confluence" in title_lower:
+        activity = "Writing Notes / Documentation 📝"
+    elif "figma" in title_lower:
+        activity = "Designing in Figma 🎨"
+    elif "stack overflow" in title_lower or "stackoverflow" in title_lower:
+        activity = "Researching on Stack Overflow 🔍"
+    elif "docs" in title_lower or "documentation" in title_lower:
+        activity = "Reading Documentation 📚"
+    elif "zoom" in title_lower or "teams" in title_lower or "meet.google" in title_lower:
+        activity = "In a Meeting / Call 📞"
+    else:
+        # Fallback to a cleaned window title
+        clean_title = window_title.strip()
+        if len(clean_title) > 50:
+            clean_title = clean_title[:47] + "..."
+        activity = f"Active Window: '{clean_title}'"
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_line = f"{timestamp} │ {status_symbol:<12} │ {activity:<45} │ Sp: {sp_score:.2f} │ Task: {task_title}\n"
+    
+    logs_dir = Path(__file__).parent.parent / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    activity_log_path = logs_dir / "activity.log"
+    
+    try:
+        with open(activity_log_path, "a", encoding="utf-8") as f:
+            f.write(log_line)
+    except Exception as e:
+        logger.error(f"Failed to write to activity.log: {e}")
+
+
 # ─── Sentinel Background Loop ────────────────────────────────────
 async def process_sentinel_loop():
     """
@@ -297,6 +364,12 @@ async def process_sentinel_loop():
                     elapsed, total_alloc, d_weight, eta,
                     alpha=alpha, beta=beta, gamma=gamma_w,
                 )
+
+                # Log to the dedicated ambient activity log
+                try:
+                    log_activity(window_title, d_weight, sp_score, active_task.clean_title)
+                except Exception as ex:
+                    logger.error(f"Failed to log ambient activity: {ex}")
 
                 # State transitions per PRD Section 8.3
                 if sp_score > 0.7:

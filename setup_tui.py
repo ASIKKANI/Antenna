@@ -1235,6 +1235,26 @@ def handle_chromadb_view():
         console.print("Make sure the backend is not locking the database file, or that the path 'backend/chroma_data' is correct.\n")
         questionary.press_any_key_to_continue().ask()
 
+def handle_activity_view():
+    clear_terminal()
+    print_banner()
+    console.print("[bold yellow]🔍 Ambient Activity Logs[/bold yellow]\n")
+    
+    activity_log = LOGS_DIR / "activity.log"
+    if not activity_log.exists():
+        console.print("[yellow]No ambient activity has been logged yet.[/yellow]")
+        console.print("Make sure the backend service is started and you have an active task!\n")
+        questionary.press_any_key_to_continue().ask()
+        return
+        
+    try:
+        with open(activity_log, "r", encoding="utf-8", errors="ignore") as f:
+            log_text = f.read()
+        interactive_pager(log_text, "AMBIENT ACTIVITY LOGS")
+    except Exception as e:
+        console.print(f"[bold red]Failed to read activity log: {e}[/bold red]\n")
+        questionary.press_any_key_to_continue().ask()
+
 # ─── Main Program ─────────────────────────────────────────────────
 def main():
     while True:
@@ -1246,6 +1266,7 @@ def main():
             choices=[
                 "🖥️ Universal Process Control Panel",
                 "📦 View ChromaDB Task Store",
+                "🔍 View Ambient Activity Logs",
                 "📱 Link WhatsApp Gateway",
                 "🧠 Configure LLM Routing & API Keys",
                 "⚙️ Edit App Settings (Persona, Phone, Polling)",
@@ -1262,6 +1283,8 @@ def main():
             handle_process_control()
         elif "View ChromaDB" in choice:
             handle_chromadb_view()
+        elif "View Ambient Activity" in choice:
+            handle_activity_view()
         elif "Link WhatsApp" in choice:
             handle_whatsapp()
         elif "Configure LLM" in choice:
