@@ -16,13 +16,26 @@
 
 const { create, decryptMedia } = require("@open-wa/wa-automate");
 const axios = require("axios");
+const path = require("path");
+const fs = require("fs");
+
+// Load local config.json fallback
+let localConfig = {};
+try {
+  const configPath = path.resolve(__dirname, "../config.json");
+  if (fs.existsSync(configPath)) {
+    localConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  }
+} catch (e) {
+  console.warn("Could not load config.json fallback:", e.message);
+}
 
 // ─── Configuration ────────────────────────────────────────────────
 const WEBHOOK_URL =
   process.env.BACKEND_WEBHOOK_URL ||
   "http://localhost:8000/api/v1/webhook/ingest";
 
-const AUTHORIZED_PHONE = process.env.AUTHORIZED_PHONE || "919876543210";
+const AUTHORIZED_PHONE = process.env.AUTHORIZED_PHONE || localConfig.authorized_phone_number || "919876543210";
 
 console.log("━━━ ChronosPet OpenWA Gateway ━━━");
 console.log(`Webhook URL: ${WEBHOOK_URL}`);
@@ -72,15 +85,22 @@ create({
 function startListening(client) {
   console.log("WhatsApp client connected. Listening for messages...");
 
-  client.onMessage(async (message) => {
+  client.onAnyMessage(async (message) => {
     try {
       // Extract sender phone (strip @c.us suffix)
       const senderRaw = message.from || message.sender?.id || "";
       const senderPhone = senderRaw.replace("@c.us", "").replace("@s.whatsapp.net", "");
 
-      // Security: drop unauthorized senders silently (PRD Req-A.2)
+      // For outgoing messages sent by the bot itself, skip processing
+      if (message.fromMe) {
+        return;
+      }
+
+      console.log(`[RECEIVED] Message from ${senderPhone}: "${message.body || ""}" (Type: ${message.type})`);
+
+      // Security: drop unauthorized senders (PRD Req-A.2)
       if (senderPhone !== AUTHORIZED_PHONE) {
-        console.log(`[DROPPED] Unauthorized sender: ${senderPhone}`);
+        console.log(`[DROPPED] Unauthorized sender: ${senderPhone} (Expected authorized phone: ${AUTHORIZED_PHONE})`);
         return;
       }
 
