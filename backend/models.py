@@ -29,6 +29,8 @@ class UserConfigSchema(BaseModel):
     authorized_phone_number: str = Field(default="919876543210", description="Target phone string to filter incoming webhooks.")
     gamification_level: int = 1
     accumulated_experience: int = 0
+    vision_enabled: bool = False
+    vision_min_interval_seconds: int = 30
     # LLM fallback chain
     llm_fallback_models: List[str] = Field(
         default=["gemini/gemini-1.5-flash", "openrouter/google/gemini-flash-1.5", "ollama/gemma2"],

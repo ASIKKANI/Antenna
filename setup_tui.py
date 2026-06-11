@@ -779,13 +779,17 @@ def handle_settings():
         console.print(f"2. Companion Persona Profile:  [cyan]{config.get('active_persona_profile', 'cybernetic')}[/cyan]")
         console.print(f"3. Sentinel Polling Frequency: [cyan]{config.get('polling_frequency_seconds', 30)} seconds[/cyan]")
         console.print(f"4. XP Awarded Per Task:        [cyan]{config.get('xp_per_task_completion', 50)} XP[/cyan]")
-        console.print(f"5. Gamification Progress:      [cyan]Level {config.get('gamification_level', 1)} (XP: {config.get('accumulated_experience', 0)})[/cyan]\n")
+        console.print(f"5. Enable Vision AI (Screenshots): [cyan]{'Yes' if config.get('vision_enabled', False) else 'No'}[/cyan]")
+        console.print(f"6. Vision AI Min Interval:     [cyan]{config.get('vision_min_interval_seconds', 30)} seconds[/cyan]")
+        console.print(f"7. Gamification Progress:      [cyan]Level {config.get('gamification_level', 1)} (XP: {config.get('accumulated_experience', 0)})[/cyan]\n")
 
         choices = [
             "📞 Edit Authorized Phone Number",
             "🎭 Edit Companion Persona Profile",
             "⏱ Edit Sentinel Polling Frequency",
             "✨ Edit XP Per Task Completion",
+            "📷 Toggle Vision AI (Screenshots)",
+            "⏱ Edit Vision AI Min Interval",
             "🎛 Reset Gamification Level & XP Progress",
             "🔙 Back to Main Menu"
         ]
@@ -851,6 +855,33 @@ def handle_settings():
                 time.sleep(1.0)
             else:
                 console.print("[bold red]Error: XP value must be a valid integer.[/bold red]")
+                time.sleep(2.0)
+
+        elif "Toggle Vision AI" in choice:
+            current = config.get("vision_enabled", False)
+            vision = questionary.confirm(
+                "Enable Vision AI (takes screenshots every poll cycle to analyze with Gemini)?",
+                default=current
+            ).ask()
+            config["vision_enabled"] = vision
+            save_config(config)
+            status_str = "enabled" if vision else "disabled"
+            console.print(f"[green]✔ Vision AI {status_str} successfully![/green]")
+            time.sleep(1.0)
+
+        elif "Edit Vision AI Min Interval" in choice:
+            current = str(config.get("vision_min_interval_seconds", 30))
+            interval = questionary.text(
+                "Enter minimum seconds between Vision AI calls (safety valve):",
+                default=current
+            ).ask()
+            if interval and interval.isdigit():
+                config["vision_min_interval_seconds"] = int(interval)
+                save_config(config)
+                console.print("[green]✔ Vision min interval updated successfully![/green]")
+                time.sleep(1.0)
+            else:
+                console.print("[bold red]Error: Min interval must be a valid integer.[/bold red]")
                 time.sleep(2.0)
 
         elif "Reset Gamification" in choice:

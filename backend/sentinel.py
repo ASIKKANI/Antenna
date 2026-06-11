@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Optional, List, Dict, Tuple
 from datetime import datetime
+from vision_analyzer import VisionResult
 
 logger = logging.getLogger(__name__)
 
@@ -335,11 +336,19 @@ def extract_task_keywords(task_title: str) -> List[str]:
     return [w for w in words if w not in stop_words]
 
 
-def evaluate_window_compliance(window_title: str, task_title: str) -> float:
+def evaluate_window_compliance(
+    window_title: str,
+    task_title: str,
+    vision_result: Optional[VisionResult] = None
+) -> float:
     """
     Returns a deviation weight D_weight between 0.0 (compliant) and 1.0 (deviant).
     Now browser-aware: extracts actual page content for accurate classification.
+    If vision_result is provided, uses its d_weight directly.
     """
+    if vision_result is not None:
+        return vision_result.d_weight
+
     # First check: is this a browser? If so, use deep classification
     ctx = extract_browser_context(window_title)
     if ctx:
@@ -364,11 +373,26 @@ def evaluate_window_compliance(window_title: str, task_title: str) -> float:
     return NEUTRAL_WEIGHT
 
 
-def get_rich_activity_description(window_title: str, task_title: str, d_weight: float) -> Tuple[str, str]:
+def get_rich_activity_description(
+    window_title: str,
+    task_title: str,
+    d_weight: float,
+    vision_result: Optional[VisionResult] = None
+) -> Tuple[str, str]:
     """
     Returns (status_emoji_label, human_readable_activity_string) for logging.
     Browser windows get deep page-level analysis. Other apps get fast keyword classification.
+    If vision_result is provided, returns its status and description.
     """
+    if vision_result is not None:
+        status_map = {
+            "focused": "🟢 FOCUSED",
+            "distracted": "🔴 DISTRACTED",
+            "neutral": "🟡 NEUTRAL",
+        }
+        emoji = status_map.get(vision_result.status, "🟡 NEUTRAL")
+        return emoji, vision_result.activity_description
+
     title_lower = window_title.lower()
 
     # ── Browser: deep analysis ────────────────────────────────────

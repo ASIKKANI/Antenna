@@ -33,6 +33,7 @@ from sentinel import (
     evaluate_window_compliance, get_rich_activity_description,
     extract_browser_context,
 )
+from vision_analyzer import capture_screen, analyze_screen, VisionResult, vision_cache
 from turbovec import memory_db
 from dotenv import load_dotenv
 
@@ -262,13 +263,13 @@ PERSONA_WEIGHTS = {
 
 
 # ─── Ambient Activity Logger ─────────────────────────────────────
-def log_activity(window_title: str, d_weight: float, sp_score: float, task_title: str):
+def log_activity(window_title: str, d_weight: float, sp_score: float, task_title: str, vision_result: Optional[VisionResult] = None):
     """
     Write a human-readable ambient activity entry to logs/activity.log.
     Uses the smart sentinel classifier for per-browser-tab and per-app descriptions.
     """
     try:
-        status_label, description = get_rich_activity_description(window_title, task_title, d_weight)
+        status_label, description = get_rich_activity_description(window_title, task_title, d_weight, vision_result)
     except Exception:
         status_label = "🟡 NEUTRAL"
         description = f"Active: \"{window_title.strip()[:60]}\""
@@ -278,6 +279,8 @@ def log_activity(window_title: str, d_weight: float, sp_score: float, task_title
         f"{timestamp} │ {status_label:<18} │ Sp={sp_score:.2f} │ "
         f"Task: [{task_title[:30]}] │ {description}\n"
     )
+    if vision_result and vision_result.reasoning:
+        log_line += f"          \033[90mLLM: \"{vision_result.reasoning}\"\033[0m\n"
 
     logs_dir = Path(__file__).parent.parent / "logs"
     logs_dir.mkdir(exist_ok=True)
@@ -314,8 +317,27 @@ async def process_sentinel_loop():
                 elapsed = current_time - int(active_task.created_at.timestamp())
                 total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
 
+                # If vision is enabled, we check the cache or call vision
+                vision_result = None
+                if system_config.vision_enabled:
+                    vision_result = vision_cache.get(system_config.vision_min_interval_seconds)
+                    if not vision_result:
+                        try:
+                            # Capture and analyze in background thread
+                            image_bytes = await asyncio.to_thread(capture_screen)
+                            vision_result = await asyncio.to_thread(
+                                analyze_screen,
+                                image_bytes,
+                                active_task.clean_title,
+                                window_title,
+                                llm_router
+                            )
+                            vision_cache.set(vision_result)
+                        except Exception as e:
+                            logger.warning(f"Vision analysis failed, falling back to keyword: {e}")
+
                 # Deviation weight from window compliance
-                d_weight = evaluate_window_compliance(window_title, active_task.clean_title)
+                d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
 
                 # Real productivity index
                 eta = calculate_productivity_index()
@@ -332,7 +354,7 @@ async def process_sentinel_loop():
 
                 # Log to the dedicated ambient activity log
                 try:
-                    log_activity(window_title, d_weight, sp_score, active_task.clean_title)
+                    log_activity(window_title, d_weight, sp_score, active_task.clean_title, vision_result)
                 except Exception as ex:
                     logger.error(f"Failed to log ambient activity: {ex}")
 
@@ -760,21 +782,64 @@ async def force_sentinel_poll():
         current_time = int(time.time())
         elapsed = current_time - int(active_task.created_at.timestamp())
         total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
-        d_weight = evaluate_window_compliance(window_title, active_task.clean_title)
+        
+        # Call vision if enabled
+        vision_result = None
+        if system_config.vision_enabled:
+            try:
+                image_bytes = await asyncio.to_thread(capture_screen)
+                vision_result = await asyncio.to_thread(
+                    analyze_screen,
+                    image_bytes,
+                    active_task.clean_title,
+                    window_title,
+                    llm_router
+                )
+            except Exception as e:
+                logger.warning(f"Vision poll failed: {e}")
+
+        d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
         eta = calculate_productivity_index()
         alpha, beta, gamma_w = PERSONA_WEIGHTS.get(system_config.active_persona_profile, (0.4, 0.4, 0.2))
         sp_score = calculate_severity_index(elapsed, total_alloc, d_weight, eta, alpha=alpha, beta=beta, gamma=gamma_w)
-        log_activity(window_title, d_weight, sp_score, active_task.clean_title)
+        log_activity(window_title, d_weight, sp_score, active_task.clean_title, vision_result)
         return {
             "window": window_title,
             "active_task": active_task.clean_title,
             "d_weight": d_weight,
             "sp_score": sp_score,
+            "vision_result": vision_result.model_dump() if vision_result else None,
             "logged": True,
         }
     else:
         log_activity(window_title, 0.3, 0.0, "(idle — no active task)")
         return {"window": window_title, "active_task": None, "logged": True}
+
+
+@app.get("/api/v1/debug/vision-snapshot")
+async def get_vision_snapshot():
+    """Takes a screenshot right now, runs vision analysis, and returns the raw VisionResult JSON."""
+    active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
+    task_title = active_tasks[-1].clean_title if active_tasks else "No active task"
+    window_title = get_active_window_title() or "Unknown"
+    
+    try:
+        image_bytes = await asyncio.to_thread(capture_screen)
+        vision_result = await asyncio.to_thread(
+            analyze_screen,
+            image_bytes,
+            task_title,
+            window_title,
+            llm_router
+        )
+        return {
+            "success": True,
+            "task_title": task_title,
+            "window_title": window_title,
+            "result": vision_result.model_dump()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Vision snapshot analysis failed: {str(e)}")
 
 
 @app.get("/api/v1/debug/activity-log")
