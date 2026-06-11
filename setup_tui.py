@@ -1238,22 +1238,55 @@ def handle_chromadb_view():
 def handle_activity_view():
     clear_terminal()
     print_banner()
-    console.print("[bold yellow]🔍 Ambient Activity Logs[/bold yellow]\n")
-    
-    activity_log = LOGS_DIR / "activity.log"
-    if not activity_log.exists():
-        console.print("[yellow]No ambient activity has been logged yet.[/yellow]")
-        console.print("Make sure the backend service is started and you have an active task!\n")
-        questionary.press_any_key_to_continue().ask()
-        return
-        
+    console.print("[bold yellow]🔍 Ambient Activity Monitor[/bold yellow]\n")
+    console.print(
+        "The activity log shows [bold green]what app/website you're on[/bold green], "
+        "interpreted in real-time against your active task.\n"
+    )
+
+    # Force an immediate sentinel poll so fresh data appears even if the 30s interval hasn't fired
     try:
-        with open(activity_log, "r", encoding="utf-8", errors="ignore") as f:
-            log_text = f.read()
-        interactive_pager(log_text, "AMBIENT ACTIVITY LOGS")
+        import requests as req
+        r = req.post("http://localhost:8000/api/v1/debug/sentinel-poll", timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            window = data.get("window", "?")
+            task_active = data.get("active_task") or "None (Idle)"
+            console.print(f"[bold cyan]📡 Immediate poll done[/bold cyan] │ Window: [yellow]{window}[/yellow] │ Task: [green]{task_active}[/green]\n")
+        else:
+            console.print(f"[yellow]Could not poll backend (status {r.status_code}). Is backend running?[/yellow]\n")
     except Exception as e:
-        console.print(f"[bold red]Failed to read activity log: {e}[/bold red]\n")
-        questionary.press_any_key_to_continue().ask()
+        console.print(f"[yellow]Could not reach backend for instant poll: {e}[/yellow]\n")
+
+    activity_log = LOGS_DIR / "activity.log"
+
+    choice = questionary.select(
+        "How do you want to view activity?",
+        choices=[
+            "📡 Live Stream (real-time, auto-refresh every 250ms)",
+            "📜 Full History (scrollable pager)",
+            "⬅️  Back",
+        ]
+    ).ask()
+
+    if not choice or "Back" in choice:
+        return
+
+    if "Live Stream" in choice:
+        stream_logs("activity")
+    elif "Full History" in choice:
+        if not activity_log.exists():
+            console.print("[yellow]No ambient activity has been logged yet.[/yellow]")
+            console.print("Make sure the backend service is started and you have an active task!\n")
+            questionary.press_any_key_to_continue().ask()
+            return
+        try:
+            with open(activity_log, "r", encoding="utf-8", errors="ignore") as f:
+                log_text = f.read()
+            interactive_pager(log_text, "AMBIENT ACTIVITY LOGS")
+        except Exception as e:
+            console.print(f"[bold red]Failed to read activity log: {e}[/bold red]\n")
+            questionary.press_any_key_to_continue().ask()
 
 # ─── Main Program ─────────────────────────────────────────────────
 def main():
