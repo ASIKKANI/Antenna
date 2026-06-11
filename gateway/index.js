@@ -53,7 +53,16 @@ create({
     "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
   ],
 })
-  .then((client) => startListening(client))
+  .then(async (client) => {
+    if (process.env.LINK_ONLY === "true") {
+      console.log("✔ WhatsApp client successfully linked!");
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await client.kill();
+      process.exit(0);
+    } else {
+      startListening(client);
+    }
+  })
   .catch((err) => {
     console.error("Failed to initialize OpenWA client:", err.message);
     process.exit(1);

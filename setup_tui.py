@@ -172,8 +172,9 @@ def run_native_whatsapp(config):
 
     # Sanitize environment dict: cast keys/values to strings and filter out any None values
     env = {str(k): str(v) for k, v in os.environ.items() if v is not None}
-    env["AUTHORIZED_PHONE"] = str(config.get("authorized_phone_number", "919876543210"))
+    env["AUTHORIZED_PHONE"] = str(config.get("authorized_phone_number") or "919876543210")
     env["BACKEND_WEBHOOK_URL"] = "http://localhost:8000/api/v1/webhook/ingest"
+    env["LINK_ONLY"] = "true"
 
     try:
         # Spawn node index.js
@@ -185,8 +186,12 @@ def run_native_whatsapp(config):
             stderr=sys.stderr,
             shell=True
         )
-        while True:
-            time.sleep(1)
+        process.wait()
+        if process.returncode == 0:
+            console.print("\n[bold green]✔ WhatsApp Gateway successfully linked and saved![/bold green]")
+        else:
+            console.print(f"\n[bold red]❌ Linking process exited with code {process.returncode}[/bold red]")
+        time.sleep(2)
     except KeyboardInterrupt:
         console.print("\n[cyan]Stopping WhatsApp Gateway...[/cyan]")
         process.terminate()
