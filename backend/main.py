@@ -33,7 +33,7 @@ from sentinel import (
     evaluate_window_compliance, get_rich_activity_description,
     extract_browser_context,
 )
-from vision_analyzer import capture_screen, analyze_screen, VisionResult, vision_cache
+from vision_analyzer import capture_screen, analyze_screen, analyze_screen_local_ocr, VisionResult, vision_cache
 from turbovec import memory_db
 from dotenv import load_dotenv
 
@@ -317,24 +317,35 @@ async def process_sentinel_loop():
                 elapsed = current_time - int(active_task.created_at.timestamp())
                 total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
 
-                # If vision is enabled, we check the cache or call vision
+                # If vision or local OCR is enabled, we check the cache or call analyzer
                 vision_result = None
-                if system_config.vision_enabled:
+                if system_config.vision_enabled or system_config.ocr_enabled:
                     vision_result = vision_cache.get(system_config.vision_min_interval_seconds)
                     if not vision_result:
                         try:
-                            # Capture and analyze in background thread
+                            # Capture screen first
                             image_bytes = await asyncio.to_thread(capture_screen)
-                            vision_result = await asyncio.to_thread(
-                                analyze_screen,
-                                image_bytes,
-                                active_task.clean_title,
-                                window_title,
-                                llm_router
-                            )
+                            
+                            if system_config.vision_enabled:
+                                # Gemini multimodal LLM analysis
+                                vision_result = await asyncio.to_thread(
+                                    analyze_screen,
+                                    image_bytes,
+                                    active_task.clean_title,
+                                    window_title,
+                                    llm_router
+                                )
+                            else:
+                                # Native local OCR analysis (runs async)
+                                vision_result = await analyze_screen_local_ocr(
+                                    image_bytes,
+                                    active_task.clean_title,
+                                    window_title
+                                )
+                            
                             vision_cache.set(vision_result)
                         except Exception as e:
-                            logger.warning(f"Vision analysis failed, falling back to keyword: {e}")
+                            logger.warning(f"Screen context analysis failed, falling back to keyword: {e}")
 
                 # Deviation weight from window compliance
                 d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
@@ -783,20 +794,27 @@ async def force_sentinel_poll():
         elapsed = current_time - int(active_task.created_at.timestamp())
         total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
         
-        # Call vision if enabled
+        # Call screen analysis if enabled
         vision_result = None
-        if system_config.vision_enabled:
+        if system_config.vision_enabled or system_config.ocr_enabled:
             try:
                 image_bytes = await asyncio.to_thread(capture_screen)
-                vision_result = await asyncio.to_thread(
-                    analyze_screen,
-                    image_bytes,
-                    active_task.clean_title,
-                    window_title,
-                    llm_router
-                )
+                if system_config.vision_enabled:
+                    vision_result = await asyncio.to_thread(
+                        analyze_screen,
+                        image_bytes,
+                        active_task.clean_title,
+                        window_title,
+                        llm_router
+                    )
+                else:
+                    vision_result = await analyze_screen_local_ocr(
+                        image_bytes,
+                        active_task.clean_title,
+                        window_title
+                    )
             except Exception as e:
-                logger.warning(f"Vision poll failed: {e}")
+                logger.warning(f"Screen poll analysis failed: {e}")
 
         d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
         eta = calculate_productivity_index()
@@ -840,6 +858,30 @@ async def get_vision_snapshot():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Vision snapshot analysis failed: {str(e)}")
+
+
+@app.get("/api/v1/debug/ocr-snapshot")
+async def get_ocr_snapshot():
+    """Takes a screenshot right now, runs local WinRT OCR, and returns the analysis."""
+    active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
+    task_title = active_tasks[-1].clean_title if active_tasks else "No active task"
+    window_title = get_active_window_title() or "Unknown"
+    
+    try:
+        image_bytes = await asyncio.to_thread(capture_screen)
+        vision_result = await analyze_screen_local_ocr(
+            image_bytes,
+            task_title,
+            window_title
+        )
+        return {
+            "success": True,
+            "task_title": task_title,
+            "window_title": window_title,
+            "result": vision_result.model_dump()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Local OCR snapshot failed: {str(e)}")
 
 
 @app.get("/api/v1/debug/activity-log")

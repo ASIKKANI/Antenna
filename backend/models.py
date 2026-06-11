@@ -30,6 +30,7 @@ class UserConfigSchema(BaseModel):
     gamification_level: int = 1
     accumulated_experience: int = 0
     vision_enabled: bool = False
+    ocr_enabled: bool = False
     vision_min_interval_seconds: int = 30
     # LLM fallback chain
     llm_fallback_models: List[str] = Field(
