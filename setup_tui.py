@@ -344,6 +344,75 @@ def handle_whatsapp():
         elif "Run System Diagnostics" in choice:
             run_diagnostics()
 
+# ─── LLM Routing Module ───────────────────────────────────────────
+def handle_llm():
+    clear_terminal()
+    print_banner()
+    console.print("[bold yellow]🧠 Configure LLM Routing & API Keys[/bold yellow]\n")
+
+    config = load_config()
+    current_prov = config.get("selected_provider", "gemini")
+    
+    provider = questionary.select(
+        "Select your primary LLM provider:",
+        choices=["gemini", "openrouter", "grok", "nvidia_nim", "ollama"],
+        default=current_prov
+    ).ask()
+
+    if not provider:
+        return
+
+    env_key = PROVIDER_ENV_KEYS[provider]
+    if env_key:
+        current_key = get_env_var(env_key)
+        masked_key = f"...{current_key[-6:]}" if len(current_key) > 6 else ""
+        key_prompt = f"Enter API key for {provider.upper()} ({env_key}):"
+        if masked_key:
+            key_prompt += f" [Current: {masked_key}]"
+
+        key_value = questionary.password(
+            key_prompt
+        ).ask()
+
+        # Update key if user entered anything (otherwise keep old one)
+        if key_value:
+            set_env_var(env_key, key_value)
+            console.print(f"[green]✔ API Key updated for {provider.upper()}.[/green]")
+    else:
+        console.print("[cyan]Ollama selected. No API key required for local models.[/cyan]")
+
+    # Select target model name
+    default_model = PROVIDER_DEFAULT_MODELS[provider]
+    current_model = config.get("target_model_name") if config.get("selected_provider") == provider else default_model
+
+    model_name = questionary.text(
+        "Enter target model name:",
+        default=current_model
+    ).ask()
+
+    # Update config.json
+    config["selected_provider"] = provider
+    config["target_model_name"] = model_name
+
+    # Check if they want to adjust the fallback sequence
+    fallbacks_choice = questionary.confirm(
+        "Would you like to keep the default fallback sequence?",
+        default=True
+    ).ask()
+
+    if not fallbacks_choice:
+        fallbacks_str = questionary.text(
+            "Enter comma-separated fallback models (e.g. gemini/gemini-1.5-flash,ollama/gemma2):",
+            default=",".join(config.get("llm_fallback_models", []))
+        ).ask()
+        if fallbacks_str:
+            config["llm_fallback_models"] = [f.strip() for f in fallbacks_str.split(",") if f.strip()]
+
+    if save_config(config):
+        console.print("[green]✔ Config updated and saved successfully![/green]\n")
+    
+    questionary.press_any_key_to_continue().ask()
+
 # ─── Settings Editor ──────────────────────────────────────────────
 def handle_settings():
     while True:
