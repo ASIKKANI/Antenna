@@ -367,7 +367,7 @@ def handle_settings():
 
     phone = questionary.text(
         "Authorized phone number (WhatsApp sender, with country code):",
-        default=config.get("authorized_phone_number", "919876543210")
+        default=config.get("authorized_phone_number") or "919876543210"
     ).ask()
 
     persona = questionary.select(
