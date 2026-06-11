@@ -249,160 +249,201 @@ def run_docker_whatsapp():
         view_logs()
 
 def handle_whatsapp():
-    clear_terminal()
-    print_banner()
-    console.print("[bold yellow]📱 WhatsApp Gateway Connector[/bold yellow]\n")
+    while True:
+        clear_terminal()
+        print_banner()
+        console.print("[bold yellow]📱 WhatsApp Gateway Manager (OpenClaw-style)[/bold yellow]\n")
 
-    config = load_config()
-    
-    choices = [
-        "🟢 Run Natively via Node.js (Safe, Recommended — No Docker needed)",
-        "🐳 Run via Docker Container (Requires Docker Desktop)",
-        "🔙 Back to Main Menu"
-    ]
+        config = load_config()
+        
+        # Determine status
+        session_file = Path("gateway/session/chronospet.data.json")
+        is_linked = session_file.exists()
+        is_running = is_native_gateway_running()
+        
+        status_text = "[green]Linked & Active (Listening)[/green]" if (is_linked and is_running) else \
+                      "[yellow]Linked (Offline)[/yellow]" if is_linked else \
+                      "[red]Not Linked / Logged Out[/red]"
+                      
+        console.print(f"Current Connection Status: {status_text}")
+        console.print(f"Authorized Phone Number:   [cyan]{config.get('authorized_phone_number') or 'Not Configured'}[/cyan]")
+        console.print(f"Gateway URL / Port:        [cyan]{config.get('openwa_gateway_url', 'http://localhost:8080')}[/cyan]\n")
 
-    choice = questionary.select(
-        "Select gateway run mode:",
-        choices=choices
-    ).ask()
+        choices = [
+            "🔗 Link / Pair WhatsApp Device (Native Node.js)",
+            "🔓 Unlink / Logout WhatsApp Session (Reset Connection)",
+            "📞 Change Authorized Phone Number (Sender Filter)",
+            "🔌 Configure Gateway Port",
+            "🚀 Run System Diagnostics (Verify Endpoint & Docker)",
+            "🔙 Back to Main Menu"
+        ]
 
-
-    if choice == choices[0]:
-        run_native_whatsapp(config)
-    elif choice == choices[1]:
-        run_docker_whatsapp()
-
-def view_logs():
-    clear_terminal()
-    print_banner()
-    console.print("[bold green]📋 Streaming Logs (Press Ctrl+C to return to menu)[/bold green]")
-    console.print("[dim]Waiting for QR code or connection confirmation...[/dim]\n")
-    
-    cmd = ["docker", "compose", "logs", "-f", "openwa"]
-    try:
-        subprocess.run(cmd)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        try:
-            subprocess.run(["docker-compose", "logs", "-f", "openwa"])
-        except KeyboardInterrupt:
-            pass
-        except Exception as e:
-            console.print(f"[bold red]Error launching logs: {e}[/bold red]")
-            questionary.press_any_key_to_continue().ask()
-    except KeyboardInterrupt:
-        pass
-
-
-# ─── LLM Routing Module ───────────────────────────────────────────
-def handle_llm():
-    clear_terminal()
-    print_banner()
-    console.print("[bold yellow]🧠 Configure LLM Routing & API Keys[/bold yellow]\n")
-
-    config = load_config()
-    current_prov = config.get("selected_provider", "gemini")
-    
-    provider = questionary.select(
-        "Select your primary LLM provider:",
-        choices=["gemini", "openrouter", "grok", "nvidia_nim", "ollama"],
-        default=current_prov
-    ).ask()
-
-    if not provider:
-        return
-
-    env_key = PROVIDER_ENV_KEYS[provider]
-    if env_key:
-        current_key = get_env_var(env_key)
-        masked_key = f"...{current_key[-6:]}" if len(current_key) > 6 else ""
-        key_prompt = f"Enter API key for {provider.upper()} ({env_key}):"
-        if masked_key:
-            key_prompt += f" [Current: {masked_key}]"
-
-        key_value = questionary.password(
-            key_prompt
+        choice = questionary.select(
+            "Select an action:",
+            choices=choices
         ).ask()
 
-        # Update key if user entered anything (otherwise keep old one)
-        if key_value:
-            set_env_var(env_key, key_value)
-            console.print(f"[green]✔ API Key updated for {provider.upper()}.[/green]")
-    else:
-        console.print("[cyan]Ollama selected. No API key required for local models.[/cyan]")
-
-    # Select target model name
-    default_model = PROVIDER_DEFAULT_MODELS[provider]
-    current_model = config.get("target_model_name") if config.get("selected_provider") == provider else default_model
-
-    model_name = questionary.text(
-        "Enter target model name:",
-        default=current_model
-    ).ask()
-
-    # Update config.json
-    config["selected_provider"] = provider
-    config["target_model_name"] = model_name
-
-    # Check if they want to adjust the fallback sequence
-    fallbacks_choice = questionary.confirm(
-        "Would you like to keep the default fallback sequence?",
-        default=True
-    ).ask()
-
-    if not fallbacks_choice:
-        fallbacks_str = questionary.text(
-            "Enter comma-separated fallback models (e.g. gemini/gemini-1.5-flash,ollama/gemma2):",
-            default=",".join(config.get("llm_fallback_models", []))
-        ).ask()
-        if fallbacks_str:
-            config["llm_fallback_models"] = [f.strip() for f in fallbacks_str.split(",") if f.strip()]
-
-    if save_config(config):
-        console.print("[green]✔ Config updated and saved successfully![/green]\n")
-    
-    questionary.press_any_key_to_continue().ask()
+        if not choice or "Back to Main" in choice:
+            break
+            
+        elif "Link / Pair" in choice:
+            run_native_whatsapp(config)
+            
+        elif "Unlink / Logout" in choice:
+            confirm = questionary.confirm(
+                "Are you sure you want to unlink and logout your WhatsApp session? (This clears saved login data)",
+                default=False
+            ).ask()
+            if confirm:
+                session_dir = Path("gateway/session")
+                persist_dir = Path("gateway/.node-persist")
+                
+                # Delete session folders
+                import shutil
+                if session_dir.exists():
+                    shutil.rmtree(session_dir, ignore_errors=True)
+                if persist_dir.exists():
+                    shutil.rmtree(persist_dir, ignore_errors=True)
+                
+                # Also delete local config cache files if any
+                config_json_path = Path("gateway/chronospet.data.json")
+                if config_json_path.exists():
+                    config_json_path.unlink(missing_ok=True)
+                
+                console.print("[green]✔ WhatsApp session unlinked successfully.[/green]")
+                time.sleep(2)
+                
+        elif "Change Authorized" in choice:
+            current_num = config.get("authorized_phone_number") or ""
+            phone = questionary.text(
+                "Enter authorized phone number (WhatsApp sender, with country code, e.g. 919876543210):",
+                default=current_num
+            ).ask()
+            if phone:
+                config["authorized_phone_number"] = phone.strip()
+                save_config(config)
+                console.print("[green]✔ Authorized phone number updated.[/green]")
+                time.sleep(1.5)
+                
+        elif "Configure Gateway" in choice:
+            current_url = config.get("openwa_gateway_url", "http://localhost:8080")
+            current_port = "8080"
+            if ":" in current_url:
+                current_port = current_url.split(":")[-1].replace("/", "")
+            
+            port = questionary.text(
+                "Enter local gateway port:",
+                default=current_port
+            ).ask()
+            if port and port.isdigit():
+                config["openwa_gateway_url"] = f"http://localhost:{port}"
+                save_config(config)
+                console.print(f"[green]✔ Gateway port updated to {port}.[/green]")
+                time.sleep(1.5)
+                
+        elif "Run System Diagnostics" in choice:
+            run_diagnostics()
 
 # ─── Settings Editor ──────────────────────────────────────────────
 def handle_settings():
-    clear_terminal()
-    print_banner()
-    console.print("[bold yellow]⚙️ Edit Application Settings[/bold yellow]\n")
+    while True:
+        clear_terminal()
+        print_banner()
+        console.print("[bold yellow]⚙️ Edit Application Settings[/bold yellow]\n")
 
-    config = load_config()
+        config = load_config()
 
-    phone = questionary.text(
-        "Authorized phone number (WhatsApp sender, with country code):",
-        default=config.get("authorized_phone_number") or "919876543210"
-    ).ask()
+        # Display current settings in a neat list
+        console.print(f"1. Authorized Phone Number:   [cyan]{config.get('authorized_phone_number') or 'Not Configured'}[/cyan]")
+        console.print(f"2. Companion Persona Profile:  [cyan]{config.get('active_persona_profile', 'cybernetic')}[/cyan]")
+        console.print(f"3. Sentinel Polling Frequency: [cyan]{config.get('polling_frequency_seconds', 30)} seconds[/cyan]")
+        console.print(f"4. XP Awarded Per Task:        [cyan]{config.get('xp_per_task_completion', 50)} XP[/cyan]")
+        console.print(f"5. Gamification Progress:      [cyan]Level {config.get('gamification_level', 1)} (XP: {config.get('accumulated_experience', 0)})[/cyan]\n")
 
-    persona = questionary.select(
-        "Active pet companion persona profile:",
-        choices=["cybernetic", "rival", "zen"],
-        default=config.get("active_persona_profile", "cybernetic")
-    ).ask()
+        choices = [
+            "📞 Edit Authorized Phone Number",
+            "🎭 Edit Companion Persona Profile",
+            "⏱ Edit Sentinel Polling Frequency",
+            "✨ Edit XP Per Task Completion",
+            "🎛 Reset Gamification Level & XP Progress",
+            "🔙 Back to Main Menu"
+        ]
 
-    frequency = questionary.text(
-        "Sentinel focus polling frequency (seconds):",
-        default=str(config.get("polling_frequency_seconds", 30))
-    ).ask()
+        choice = questionary.select(
+            "Select an option to edit:",
+            choices=choices
+        ).ask()
 
-    xp_completion = questionary.text(
-        "XP awarded per completed task:",
-        default=str(config.get("xp_per_task_completion", 50))
-    ).ask()
+        if not choice or "Back to Main" in choice:
+            break
 
-    try:
-        config["authorized_phone_number"] = phone
-        config["active_persona_profile"] = persona
-        config["polling_frequency_seconds"] = int(frequency)
-        config["xp_per_task_completion"] = int(xp_completion)
-        
-        if save_config(config):
-            console.print("[green]✔ Settings updated successfully![/green]\n")
-    except ValueError:
-        console.print("[bold red]Error: Polling frequency and XP must be integers. Settings not saved.[/bold red]\n")
+        elif "Edit Authorized" in choice:
+            current = config.get("authorized_phone_number") or ""
+            phone = questionary.text(
+                "Enter authorized phone number (WhatsApp sender, with country code, e.g. 919876543210):",
+                default=current
+            ).ask()
+            if phone:
+                config["authorized_phone_number"] = phone.strip()
+                save_config(config)
+                console.print("[green]✔ Phone number updated successfully![/green]")
+                time.sleep(1.0)
 
-    questionary.press_any_key_to_continue().ask()
+        elif "Edit Companion Persona" in choice:
+            current = config.get("active_persona_profile", "cybernetic")
+            persona = questionary.select(
+                "Select active pet companion persona profile:",
+                choices=["cybernetic", "rival", "zen"],
+                default=current
+            ).ask()
+            if persona:
+                config["active_persona_profile"] = persona
+                save_config(config)
+                console.print("[green]✔ Persona profile updated successfully![/green]")
+                time.sleep(1.0)
+
+        elif "Edit Sentinel Polling" in choice:
+            current = str(config.get("polling_frequency_seconds", 30))
+            freq = questionary.text(
+                "Enter Sentinel focus polling frequency (seconds):",
+                default=current
+            ).ask()
+            if freq and freq.isdigit():
+                config["polling_frequency_seconds"] = int(freq)
+                save_config(config)
+                console.print("[green]✔ Polling frequency updated successfully![/green]")
+                time.sleep(1.0)
+            else:
+                console.print("[bold red]Error: Polling frequency must be a valid integer.[/bold red]")
+                time.sleep(2.0)
+
+        elif "Edit XP Per Task" in choice:
+            current = str(config.get("xp_per_task_completion", 50))
+            xp = questionary.text(
+                "Enter XP awarded per completed task:",
+                default=current
+            ).ask()
+            if xp and xp.isdigit():
+                config["xp_per_task_completion"] = int(xp)
+                save_config(config)
+                console.print("[green]✔ XP reward updated successfully![/green]")
+                time.sleep(1.0)
+            else:
+                console.print("[bold red]Error: XP value must be a valid integer.[/bold red]")
+                time.sleep(2.0)
+
+        elif "Reset Gamification" in choice:
+            confirm = questionary.confirm(
+                "Are you sure you want to reset all Level and XP progress? (This cannot be undone)",
+                default=False
+            ).ask()
+            if confirm:
+                config["gamification_level"] = 1
+                config["accumulated_experience"] = 0
+                save_config(config)
+                console.print("[green]✔ Gamification level and XP reset successfully.[/green]")
+                time.sleep(1.5)
+
 
 # ─── Diagnostic Checks ────────────────────────────────────────────
 def run_diagnostics():
