@@ -87,15 +87,23 @@ function startListening(client) {
 
   client.onAnyMessage(async (message) => {
     try {
-      // Extract sender phone (strip @c.us suffix)
+      // Extract sender phone (strip suffixes and device IDs)
       const senderRaw = message.from || message.sender?.id || "";
-      const senderPhone = senderRaw.replace("@c.us", "").replace("@s.whatsapp.net", "");
+      const senderPhone = senderRaw.split("@")[0].split(":")[0];
+
+      // Extract recipient phone
+      const toRaw = message.to || "";
+      const toPhone = toRaw.split("@")[0].split(":")[0];
 
       // Log immediately so we see all traffic
-      console.log(`[RECEIVED] Message from ${senderPhone}: "${message.body || ""}" (fromMe: ${!!message.fromMe}, Type: ${message.type})`);
+      console.log(`[RECEIVED] Message from ${senderPhone} to ${toPhone}: "${message.body || ""}" (fromMe: ${!!message.fromMe}, Type: ${message.type})`);
 
-      // For outgoing messages sent by the bot itself, skip processing (unless it is a message to self)
-      if (message.fromMe && message.to !== message.from) {
+      // Skip automated bot responses to avoid infinite loop feedback
+      if (message.fromMe && message.body && (
+        message.body.startsWith("✅ Task captured:") ||
+        message.body.startsWith("🎉 ") ||
+        message.body.includes("marked complete!")
+      )) {
         return;
       }
 
