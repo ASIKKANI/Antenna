@@ -168,7 +168,7 @@ Where:
    > Scan the QR code printed in the terminal with WhatsApp (Linked Devices) to authorize task ingestion.
    
    <p align="center">
-     <img src="./images/whatsapp_gateway.png" alt="WhatsApp QR Code Link" width="450" style="border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);" />
+     
    </p>
 
 3. **Launch the Tauri Widget UI**
