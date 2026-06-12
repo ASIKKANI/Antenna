@@ -173,6 +173,10 @@
           {#if isTyping}
             <span class="typing-cursor">▌</span>
           {/if}
+          <!-- Close button to dismiss dialogue bubble -->
+          <!-- svelte-ignore a11y-click-events-have-key-events -->
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <div class="bubble-close-btn" on:click={() => { displayedDialogue = ""; }} title="Dismiss">✕</div>
         </div>
       </div>
     {/if}
@@ -325,11 +329,27 @@
     backdrop-filter: blur(12px);
     border: 1px solid var(--cp-border);
     border-radius: var(--cp-radius-sm);
-    padding: 10px 14px;
+    padding: 10px 20px 10px 14px; /* Extra right padding for close button */
     font-size: 12px;
     line-height: 1.5;
     color: var(--cp-text-primary);
     box-shadow: var(--cp-shadow);
+    pointer-events: auto; /* Enable mouse events for close button click */
+  }
+
+  .bubble-close-btn {
+    position: absolute;
+    top: 2px;
+    right: 5px;
+    font-size: 9px;
+    color: var(--cp-text-secondary);
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px;
+    transition: color 0.2s;
+  }
+  .bubble-close-btn:hover {
+    color: var(--cp-accent-danger);
   }
   .dialogue-bubble::before {
     content: '';

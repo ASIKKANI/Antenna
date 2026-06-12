@@ -1,15 +1,14 @@
 {
-    "selected_provider": "gemini",
-    "target_model_name": "gemini-1.5-flash",
+    "selected_provider": "ollama",
+    "target_model_name": "openbmb/minicpm-v4.6:latest",
     "active_persona_profile": "zen",
     "polling_frequency_seconds": 30,
     "authorized_phone_number": "918681980569",
     "gamification_level": 1,
     "accumulated_experience": 0,
     "llm_fallback_models": [
-        "gemini/gemini-1.5-flash",
-        "openrouter/google/gemini-flash-1.5",
-        "ollama/gemma2"
+        "ollama/openbmb/minicpm-v4.6:latest",
+        "ollama/MiniCPM5-1B-Q4_K_M:latest"
     ],
     "openwa_gateway_url": "http://localhost:8080",
     "xp_per_task_completion": 50,
@@ -25,6 +24,6 @@
         4000,
         5500
     ],
-    "vision_enabled": false,
+    "vision_enabled": true,
     "vision_min_interval_seconds": 3010
 }
