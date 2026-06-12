@@ -146,6 +146,12 @@ def award_xp(amount: int):
     gamification["xp"] += amount
     gamification["level"] = calculate_level(gamification["xp"])
     gamification["evolution_stage"] = calculate_evolution(gamification["level"])
+    
+    # Sync with system config and persist
+    system_config.accumulated_experience = gamification["xp"]
+    system_config.gamification_level = gamification["level"]
+    save_system_config()
+    
     logger.info(f"XP awarded: +{amount} → Total: {gamification['xp']}, "
                 f"Level: {gamification['level']}, Stage: {gamification['evolution_stage']}")
 
@@ -194,6 +200,7 @@ def build_companion_state(
         experience_progress_percentage=calculate_xp_progress(gamification["xp"], gamification["level"]),
         evolution_stage=gamification["evolution_stage"],
         active_tasks_count=active_count,
+        selected_pet_id=system_config.selected_pet_id,
     ).model_dump()
 
 
@@ -637,6 +644,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount standalone pet creator GUI
+from fastapi.staticfiles import StaticFiles
+static_creator_dir = Path(__file__).parent / "static" / "creator"
+static_creator_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/creator", StaticFiles(directory=str(static_creator_dir), html=True), name="creator")
+
 
 # ─── Health Check ─────────────────────────────────────────────────
 @app.get("/health")
@@ -961,6 +974,144 @@ async def get_gamification():
             if gamification["level"] < len(system_config.xp_level_thresholds)
             else None
         ),
+    }
+
+
+# ─── Companion & Pet Customization API ────────────────────────────
+CUSTOM_PETS_PATH = Path(__file__).parent / "data" / "custom_pets.json"
+
+def save_system_config():
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(system_config.model_dump(), f, indent=4)
+        logger.info(f"Config saved successfully to {CONFIG_PATH}")
+    except Exception as e:
+        logger.error(f"Failed to save config: {e}")
+
+def load_custom_pets() -> list:
+    if not CUSTOM_PETS_PATH.exists():
+        return []
+    try:
+        with open(CUSTOM_PETS_PATH, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load custom pets: {e}")
+        return []
+
+def save_custom_pet(pet_data: dict):
+    CUSTOM_PETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    custom_list = load_custom_pets()
+    
+    # Overwrite if exists, otherwise append
+    existing_idx = next((i for i, p in enumerate(custom_list) if p["id"] == pet_data["id"]), -1)
+    if existing_idx != -1:
+        custom_list[existing_idx] = pet_data
+    else:
+        custom_list.append(pet_data)
+        
+    try:
+        with open(CUSTOM_PETS_PATH, "w") as f:
+            json.dump(custom_list, f, indent=4)
+        logger.info(f"Custom pet '{pet_data.get('name')}' saved successfully.")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save custom pet: {e}")
+        return False
+
+
+@app.get("/api/v1/companion/pets")
+async def get_pets():
+    """Returns both premade and custom pets."""
+    from premade_pets import get_premade_pets_expanded
+    try:
+        premade = get_premade_pets_expanded()
+    except Exception as e:
+        logger.error(f"Failed to load premade pets: {e}")
+        premade = []
+    custom = load_custom_pets()
+    return {"pets": premade + custom, "selected_pet_id": system_config.selected_pet_id}
+
+
+@app.post("/api/v1/companion/pets")
+async def create_custom_pet(payload: dict):
+    """Saves a custom-created pixel art pet configuration."""
+    if not payload.get("id") or not payload.get("name") or not payload.get("states"):
+        raise HTTPException(status_code=400, detail="Invalid pet configuration payload.")
+    success = save_custom_pet(payload)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save pet configuration to disk.")
+    return {"message": f"Pet '{payload['name']}' saved successfully.", "id": payload["id"]}
+
+
+class SelectPetPayload(BaseModel):
+    pet_id: str
+
+
+@app.post("/api/v1/companion/select-pet")
+async def select_active_pet(payload: SelectPetPayload):
+    """Sets the active pet and persists selection to config.json."""
+    system_config.selected_pet_id = payload.pet_id
+    save_system_config()
+    
+    # Broadcast updated state so Svelte immediately updates the rendering
+    await manager.broadcast_state(
+        build_companion_state(
+            animation="focus_mode_active",
+            dialogue=f"Morphing sequence initialized...",
+            focus=100
+        )
+    )
+    return {"message": f"Active pet updated to '{payload.pet_id}'", "selected_pet_id": payload.pet_id}
+
+
+from typing import Literal
+
+class InteractPayload(BaseModel):
+    action: Literal["pet", "feed"]
+
+
+@app.post("/api/v1/companion/interact")
+async def interact_with_companion(payload: InteractPayload):
+    """Handles pet petting and feeding, awards XP, and returns dialogue/animation updates."""
+    # 1. Determine interaction award
+    if payload.action == "pet":
+        xp_gain = 10
+        dialogues = [
+            "Hehehe, that tickles! *purrs happily* (+10 XP)",
+            "Aww, thank you! I love head scratches! (+10 XP)",
+            "Mmm, so cozy... you are the best! (+10 XP)"
+        ]
+    elif payload.action == "feed":
+        xp_gain = 25
+        dialogues = [
+            "Nom nom nom... tasty! Thanks for the treat! (+25 XP)",
+            "Yum! That was delicious! Focus restored! (+25 XP)",
+            "Ooh, a cookie! My favorite! (+25 XP)"
+        ]
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
+        
+    import random
+    dialogue = random.choice(dialogues)
+    
+    # 2. Award XP (persists config automatically inside award_xp)
+    award_xp(xp_gain)
+    
+    # 3. Broadcast updated companion state immediately to WebSocket
+    state = build_companion_state(
+        animation="celebrating",
+        dialogue=dialogue,
+        focus=100
+    )
+    await manager.broadcast_state(state)
+    
+    return {
+        "message": f"Successfully triggered {payload.action}",
+        "xp_awarded": xp_gain,
+        "new_xp": gamification["xp"],
+        "new_level": gamification["level"],
+        "new_stage": gamification["evolution_stage"],
+        "dialogue": dialogue
     }
 
 

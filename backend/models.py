@@ -25,6 +25,7 @@ class UserConfigSchema(BaseModel):
     selected_provider: Literal["gemini", "openrouter", "nvidia_nim", "grok", "ollama"] = "gemini"
     target_model_name: str = "gemini-1.5-flash"
     active_persona_profile: Literal["cybernetic", "rival", "zen"] = "cybernetic"
+    selected_pet_id: str = "default_drone"
     polling_frequency_seconds: int = 30
     authorized_phone_number: str = Field(default="919876543210", description="Target phone string to filter incoming webhooks.")
     gamification_level: int = 1
@@ -62,6 +63,7 @@ class CompanionState(BaseModel):
     experience_progress_percentage: float = 0.0
     evolution_stage: str = "drone"  # drone → scout → sentinel → guardian → titan
     active_tasks_count: int = 0
+    selected_pet_id: str = "default_drone"
 
 # ─── LLM Parsed Task Schema (for response_format) ─────────────────
 class LLMParsedTask(BaseModel):

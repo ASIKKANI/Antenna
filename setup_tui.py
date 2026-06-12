@@ -1468,6 +1468,7 @@ def main():
             choices=[
                 "🖥️ Universal Process Control Panel",
                 "🦙 Ollama Local Model Manager",
+                "🎨 Open Pet Customization GUI",
                 "📦 View ChromaDB Task Store",
                 "🔍 View Ambient Activity Logs",
                 "📱 Link WhatsApp Gateway",
@@ -1486,6 +1487,11 @@ def main():
             handle_process_control()
         elif "Ollama Local Model Manager" in choice:
             handle_ollama_manager()
+        elif "Customization GUI" in choice:
+            import webbrowser
+            console.print("[cyan]Opening Pet Customization & Creation GUI in default web browser...[/cyan]")
+            webbrowser.open("http://localhost:8000/creator")
+            time.sleep(1.0)
         elif "View ChromaDB" in choice:
             handle_chromadb_view()
         elif "View Ambient Activity" in choice:

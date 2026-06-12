@@ -13,6 +13,7 @@
     experience_progress_percentage: 0,
     evolution_stage: "drone",
     active_tasks_count: 0,
+    selected_pet_id: "default_drone",
   };
 
   let displayedDialogue = "";
@@ -23,8 +24,240 @@
   let uiOpacity = 85; // 0 to 100
   let ws: CompanionWebSocket | null = null;
 
+  // ─── Companion Pet State ─────────────────────────────────────
+  let pets: any[] = [];
+  let selectedPetId = "default_drone";
+  let petCanvas: HTMLCanvasElement | null = null;
+  let rafId: number | null = null;
+
+  interface Particle {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    color: string;
+    life: number;
+    decay: number;
+    size: number;
+    type: string;
+  }
+
+  let particles: Particle[] = [];
+  let particleOverride: "heart" | "food" | null = null;
+  let particleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function interact(action: "pet" | "feed") {
+    // Set optimistically for instant feedback
+    particleOverride = action === "pet" ? "heart" : "food";
+    if (particleTimer) clearTimeout(particleTimer);
+    particleTimer = setTimeout(() => {
+      particleOverride = null;
+      particleTimer = null;
+    }, 3500);
+
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/companion/interact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      if (!response.ok) {
+        // Revert if API failed
+        particleOverride = null;
+        if (particleTimer) {
+          clearTimeout(particleTimer);
+          particleTimer = null;
+        }
+      } else {
+        await fetchPets();
+      }
+    } catch (err) {
+      console.error(`Failed to trigger ${action}:`, err);
+      particleOverride = null;
+      if (particleTimer) {
+        clearTimeout(particleTimer);
+        particleTimer = null;
+      }
+    }
+  }
+
+  async function fetchPets() {
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/companion/pets");
+      if (response.ok) {
+        const data = await response.json();
+        pets = data.pets;
+        selectedPetId = data.selected_pet_id || "default_drone";
+      }
+    } catch (err) {
+      console.error("Failed to fetch pets:", err);
+    }
+  }
+
+  function spawnParticle(state: string) {
+    if (Math.random() > 0.4) return;
+    
+    let color = "#38bdf8";
+    let vx = (Math.random() - 0.5) * 0.5;
+    let vy = -Math.random() * 0.8 - 0.2;
+    let size = Math.random() > 0.5 ? 2 : 1;
+    let decay = Math.random() * 0.02 + 0.01;
+    let type = "normal";
+    
+    if (particleOverride === "heart") {
+      type = "heart";
+      color = "#f43f5e";
+      vx = (Math.random() - 0.5) * 0.8;
+      vy = -Math.random() * 0.8 - 0.4;
+      decay = Math.random() * 0.015 + 0.01;
+    } else if (particleOverride === "food") {
+      type = "food";
+      color = "#d97706";
+      vx = (Math.random() - 0.5) * 0.6;
+      vy = Math.random() * 0.8 + 0.4;
+      decay = Math.random() * 0.02 + 0.015;
+    } else {
+      if (state === "focus_mode_active") {
+        color = Math.random() > 0.5 ? "#8b5cf6" : "#38bdf8";
+        vy = -Math.random() * 0.6 - 0.2;
+      } else if (state === "nagging_mild" || state === "nagging_severe") {
+        color = Math.random() > 0.5 ? "#ef4444" : "#f59e0b";
+        vx = (Math.random() - 0.5) * 0.8;
+        vy = -Math.random() * 0.5 - 0.3;
+      } else if (state === "celebrating") {
+        color = Math.random() > 0.5 ? "#fbbf24" : "#34d399";
+        vx = (Math.random() - 0.5) * 1.5;
+        vy = -Math.random() * 1.2 - 0.4;
+        size = Math.random() > 0.5 ? 3 : 2;
+      } else {
+        if (Math.random() > 0.15) return;
+        color = "rgba(255, 255, 255, 0.3)";
+        vy = -Math.random() * 0.3 - 0.1;
+      }
+    }
+    
+    let x = 32 + Math.random() * 64;
+    let y = type === "food" ? 10 + Math.random() * 10 : 80 + Math.random() * 20;
+
+    particles.push({
+      x,
+      y,
+      vx,
+      vy,
+      color,
+      life: 1.0,
+      decay,
+      size,
+      type
+    });
+  }
+
+  function renderLoop() {
+    if (!petCanvas) {
+      rafId = requestAnimationFrame(renderLoop);
+      return;
+    }
+    
+    const ctx = petCanvas.getContext("2d");
+    if (!ctx) {
+      rafId = requestAnimationFrame(renderLoop);
+      return;
+    }
+    
+    ctx.clearRect(0, 0, petCanvas.width, petCanvas.height);
+    
+    const pet = pets.find(p => p.id === selectedPetId);
+    if (pet) {
+      let stateName = companionState.display_animation_frame || "idle_loop";
+      let stateData = pet.states[stateName];
+      if (!stateData || !stateData.frames || stateData.frames.length === 0) {
+        stateName = "idle_loop";
+        stateData = pet.states[stateName];
+      }
+      if (!stateData || !stateData.frames || stateData.frames.length === 0) {
+        const keys = Object.keys(pet.states);
+        if (keys.length > 0) {
+          stateName = keys[0];
+          stateData = pet.states[stateName];
+        }
+      }
+      
+      if (stateData && stateData.frames && stateData.frames.length > 0) {
+        const speedMs = stateData.speed_ms || 400;
+        const totalFrames = stateData.frames.length;
+        const now = Date.now();
+        const frameIdx = Math.floor(now / speedMs) % totalFrames;
+        const frame = stateData.frames[frameIdx];
+        
+        if (frame) {
+          const resolution = Math.sqrt(frame.length);
+          const cellWidth = petCanvas.width / resolution;
+          const cellHeight = petCanvas.height / resolution;
+          
+          for (let i = 0; i < frame.length; i++) {
+            const color = frame[i];
+            if (color) {
+              const r = Math.floor(i / resolution);
+              const c = i % resolution;
+              ctx.fillStyle = color;
+              ctx.fillRect(c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+            }
+          }
+        }
+      }
+    }
+    
+    const stateName = companionState.display_animation_frame || "idle_loop";
+    spawnParticle(stateName);
+    
+    particles = particles.filter(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+      
+      if (p.life > 0) {
+        ctx.globalAlpha = p.life;
+        if (p.type === "heart") {
+          ctx.fillStyle = "#f43f5e"; // rose pink
+          const px = Math.floor(p.x);
+          const py = Math.floor(p.y);
+          ctx.fillRect(px, py, 1, 1);
+          ctx.fillRect(px + 2, py, 1, 1);
+          ctx.fillRect(px, py + 1, 3, 1);
+          ctx.fillRect(px + 1, py + 2, 1, 1);
+        } else if (p.type === "food") {
+          ctx.fillStyle = "#d97706"; // amber brown
+          const px = Math.floor(p.x);
+          const py = Math.floor(p.y);
+          ctx.fillRect(px, py, 2, 2);
+          ctx.fillStyle = "#78350f"; // dark chocolate chip
+          ctx.fillRect(px, py, 1, 1);
+        } else {
+          ctx.fillStyle = p.color;
+          ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+        }
+        ctx.globalAlpha = 1.0;
+        return true;
+      }
+      return false;
+    });
+    
+    rafId = requestAnimationFrame(renderLoop);
+  }
+
+  $: if (companionState.selected_pet_id && companionState.selected_pet_id !== selectedPetId) {
+    selectedPetId = companionState.selected_pet_id;
+    fetchPets();
+  }
+
+  $: {
+    if (petCanvas && !rafId) {
+      rafId = requestAnimationFrame(renderLoop);
+    }
+  }
+
   // ─── Task Management State ─────────────────────────────────────
-  let activeTab: "core" | "tasks" = "core";
+  let activeTab: "core" | "tasks" | "interact" = "core";
   let tasks: any[] = [];
   let newTaskTitle = "";
   let newTaskPriority = "medium";
@@ -211,9 +444,11 @@
 
   // ─── Lifecycle ───────────────────────────────────────────────
   onMount(() => {
+    fetchPets();
     ws = new CompanionWebSocket(
       (state) => {
         companionState = state;
+        fetchPets();
         if (state.active_bubble_dialogue && 
             state.active_bubble_dialogue !== displayedDialogue && 
             state.active_bubble_dialogue !== lastDismissedDialogue) {
@@ -232,6 +467,10 @@
   onDestroy(() => {
     ws?.destroy();
     if (typewriterTimer) clearTimeout(typewriterTimer);
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
   });
 </script>
 
@@ -244,23 +483,26 @@
   <!-- Sprite Container (Draggable) -->
   <div class="sprite-container">
        
-    <!-- The actual Sprite (SVG inline) -->
+    <!-- The actual Sprite (SVG or Canvas) -->
     <!-- svelte-ignore a11y-click-events-have-key-events -->
     <!-- svelte-ignore a11y-no-static-element-interactions -->
     <div class="pet-sprite {animClass}" on:pointerdown={handlePointerDown} on:pointermove={handlePointerMove} on:pointerup={handlePointerUp} style="opacity: var(--ui-opacity); cursor: grab; background: rgba(1,1,1,0.01); border-radius: 50%;">
-      <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" style="pointer-events: none;">
-        <circle cx="64" cy="64" r="50" fill="#1e293b" stroke="#334155" stroke-width="4"/>
-        <circle cx="64" cy="64" r="35" fill="#0f172a"/>
-        <!-- Visor -->
-        <rect x="40" y="55" width="48" height="14" rx="7" fill="#38bdf8" />
-        <rect x="45" y="58" width="38" height="8" rx="4" fill="#e0f2fe" />
-        <!-- Details -->
-        <circle cx="64" cy="35" r="4" fill="#ef4444"/>
-      </svg>
+      {#if selectedPetId === "default_drone"}
+        <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="64" cy="64" r="50" fill="#1e293b" stroke="#334155" stroke-width="4"/>
+          <circle cx="64" cy="64" r="35" fill="#0f172a"/>
+          <!-- Visor -->
+          <rect x="40" y="55" width="48" height="14" rx="7" fill="#38bdf8" />
+          <rect x="45" y="58" width="38" height="8" rx="4" fill="#e0f2fe" />
+          <!-- Details -->
+          <circle cx="64" cy="35" r="4" fill="#ef4444"/>
+        </svg>
+      {/if}
+      <canvas bind:this={petCanvas} width="128" height="128"></canvas>
     </div>
          
-    <!-- Dialogue Bubble (Only shows if typing or critical, or dashboard closed) -->
-    {#if displayedDialogue && (!showDashboard || companionState.display_animation_frame === 'nagging_severe')}
+    <!-- Dialogue Bubble (Shows if typing, critical, dashboard closed, or playing in play tab) -->
+    {#if displayedDialogue && (!showDashboard || activeTab === 'interact' || companionState.display_animation_frame === 'nagging_severe')}
       <div class="dialogue-float">
         <div class="dialogue-bubble">
           <span class="dialogue-text">{displayedDialogue}</span>
@@ -302,6 +544,7 @@
       <div class="tabs-row">
         <button class="tab-btn" class:active={activeTab === 'core'} on:click={() => activeTab = 'core'}>📊 Core</button>
         <button class="tab-btn" class:active={activeTab === 'tasks'} on:click={() => { activeTab = 'tasks'; fetchTasks(); }}>🎯 Tasks ({companionState.active_tasks_count})</button>
+        <button class="tab-btn" class:active={activeTab === 'interact'} on:click={() => activeTab = 'interact'}>🧸 Play</button>
       </div>
 
       {#if activeTab === 'core'}
@@ -349,7 +592,7 @@
             <span class="state-label">{companionState.display_animation_frame}</span>
           </div>
         </div>
-      {:else}
+      {:else if activeTab === 'tasks'}
         <!-- ─── Tasks Section ────────────────────────────────────── -->
         <div class="tasks-section">
           <!-- Add Task Form -->
@@ -402,6 +645,42 @@
             {/if}
           </div>
         </div>
+      {:else}
+        <!-- Play / Interaction Section -->
+        <div class="interact-section">
+          <div class="section-title flex items-center justify-between mb-3 border-b border-white/5 pb-1">
+            <span class="text-xs font-mono font-bold tracking-wider text-slate-300">PLAY & CARE</span>
+            <span class="text-[10px] text-slate-500 font-mono">LVL {companionState.current_level}</span>
+          </div>
+          
+          <div class="interact-grid">
+            <button class="interact-card" on:click={() => interact("pet")}>
+              <div class="icon">👋</div>
+              <div class="details">
+                <span class="title">Pet Companion</span>
+                <span class="reward">+10 XP</span>
+              </div>
+            </button>
+            
+            <button class="interact-card" on:click={() => interact("feed")}>
+              <div class="icon">🍖</div>
+              <div class="details">
+                <span class="title">Feed Treat</span>
+                <span class="reward">+25 XP</span>
+              </div>
+            </button>
+          </div>
+          
+          <div class="interact-footer flex flex-col gap-1 border-t border-white/5 pt-2 text-[10px] text-slate-400 font-mono mt-auto">
+            <div class="flex justify-between">
+              <span>EXP points:</span>
+              <span class="text-indigo-400 font-bold">{companionState.experience_progress_percentage}% ({companionState.evolution_stage})</span>
+            </div>
+            <div class="progress-track" style="margin-top: 2px;">
+              <div class="progress-fill xp-bar-fill" style="width: {companionState.experience_progress_percentage}%;"></div>
+            </div>
+          </div>
+        </div>
       {/if}
 
       <!-- ─── Controls & Footer ───────────────────────────────── -->
@@ -434,11 +713,35 @@
   }
 
   .pet-sprite {
+    position: relative;
     width: 128px;
     height: 128px;
     object-fit: contain;
     filter: drop-shadow(0 4px 12px rgba(0,0,0,0.5));
     transition: filter 0.3s ease, transform 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pet-sprite svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+  .pet-sprite canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    width: 128px;
+    height: 128px;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: -webkit-crisp-edges;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    pointer-events: none;
   }
   .pet-sprite:hover {
     filter: drop-shadow(0 0 15px var(--cp-accent-glow));
@@ -925,5 +1228,73 @@
     background: var(--cp-accent-danger);
     border-color: var(--cp-accent-danger);
     color: white;
+  }
+
+  /* ─── Play / Interaction Tab Styles ────────────────────────── */
+  .interact-section {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: 380px;
+    overflow: hidden;
+  }
+  .interact-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .interact-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--cp-border);
+    border-radius: var(--cp-radius-sm);
+    padding: 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+    width: 100%;
+    color: var(--cp-text-primary);
+    outline: none;
+  }
+  .interact-card:hover {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: var(--cp-accent);
+    transform: translateY(-1px);
+  }
+  .interact-card:active {
+    transform: translateY(0);
+  }
+  .interact-card .icon {
+    font-size: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .interact-card:hover .icon {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.3);
+  }
+  .interact-card .details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .interact-card .title {
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .interact-card .reward {
+    font-size: 10px;
+    font-family: var(--cp-font-mono);
+    color: var(--cp-accent-glow);
+    font-weight: 500;
   }
 </style>

@@ -13,6 +13,7 @@ export interface CompanionState {
   experience_progress_percentage: number;
   evolution_stage: string;
   active_tasks_count: number;
+  selected_pet_id: string;
 }
 
 type StateCallback = (state: CompanionState) => void;

@@ -296,6 +296,93 @@ class TestVSERoutes:
         assert result.dialogue == "Focus on coding!"
 
 
+# ─── Companion Pet Customization Tests ─────────────────────────────
+
+class TestCompanionPetCustomization:
+    def test_get_pets(self, client):
+        """Verify that GET /api/v1/companion/pets returns both premade and custom pets."""
+        resp = client.get("/api/v1/companion/pets")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "pets" in data
+        assert "selected_pet_id" in data
+        pets = data["pets"]
+        assert len(pets) >= 3 # at least cat, dog, slime premade pets
+        # Verify fields in first pet
+        first_pet = pets[0]
+        assert "id" in first_pet
+        assert "name" in first_pet
+        assert "states" in first_pet
+
+    def test_create_and_select_custom_pet(self, client):
+        """Verify pet creation and selection endpoints."""
+        # Create a mock custom pet
+        payload = {
+            "id": "test_pixel_pet",
+            "name": "Test Pixel Pet",
+            "type": "custom",
+            "states": {
+                "idle_loop": {
+                    "frames": [
+                        ["#ffffff" for _ in range(256)],
+                        ["#000000" for _ in range(256)]
+                    ],
+                    "speed_ms": 500
+                }
+            }
+        }
+        resp = client.post("/api/v1/companion/pets", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["id"] == "test_pixel_pet"
+
+        # Check that it shows up in pets list
+        list_resp = client.get("/api/v1/companion/pets")
+        assert list_resp.status_code == 200
+        pets = list_resp.json()["pets"]
+        custom_pet = next((p for p in pets if p["id"] == "test_pixel_pet"), None)
+        assert custom_pet is not None
+        assert custom_pet["name"] == "Test Pixel Pet"
+
+        # Select the active pet
+        select_resp = client.post("/api/v1/companion/select-pet", json={"pet_id": "test_pixel_pet"})
+        assert select_resp.status_code == 200
+        assert select_resp.json()["selected_pet_id"] == "test_pixel_pet"
+
+        # Verify selection is reflected in GET response
+        list_resp2 = client.get("/api/v1/companion/pets")
+        assert list_resp2.json()["selected_pet_id"] == "test_pixel_pet"
+
+        # Revert back to default_drone to clean up state
+        revert_resp = client.post("/api/v1/companion/select-pet", json={"pet_id": "default_drone"})
+        assert revert_resp.status_code == 200
+
+    def test_interact_with_companion(self, client):
+        """Verify petting and feeding companion, XP increase, and validation."""
+        # Pet companion
+        resp = client.post("/api/v1/companion/interact", json={"action": "pet"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["message"] == "Successfully triggered pet"
+        assert data["xp_awarded"] == 10
+        assert "new_xp" in data
+        assert "new_level" in data
+        assert "new_stage" in data
+        assert "dialogue" in data
+
+        # Feed companion
+        resp_feed = client.post("/api/v1/companion/interact", json={"action": "feed"})
+        assert resp_feed.status_code == 200
+        data_feed = resp_feed.json()
+        assert data_feed["message"] == "Successfully triggered feed"
+        assert data_feed["xp_awarded"] == 25
+
+        # Invalid action
+        resp_invalid = client.post("/api/v1/companion/interact", json={"action": "sleep"})
+        assert resp_invalid.status_code == 422  # FastAPI validation error for Literal
+
+
+
+
 
 
 

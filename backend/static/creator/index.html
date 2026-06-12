@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChronosPet Art Laboratory</title>
+  <!-- TailwindCSS for modern design structure -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: radial-gradient(circle at top, #0f172a 0%, #020617 100%);
+      color: #e2e8f0;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(99, 102, 241, 0.15);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    .glass-card:hover {
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+    /* Pixelated canvas rendering */
+    canvas {
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-crisp-edges;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 6px;
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.3);
+      border-radius: 100px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(99, 102, 241, 0.5);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col p-6">
+
+  <!-- ─── HEADER ────────────────────────────────────────────────── -->
+  <header class="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+    <div class="flex items-center gap-3">
+      <span class="text-3xl">🎨</span>
+      <div>
+        <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+          ChronosPet <span class="text-indigo-400 font-mono text-xs px-2 py-0.5 bg-indigo-500/10 rounded-full border border-indigo-500/20">Art Laboratory v1.0</span>
+        </h1>
+        <p class="text-xs text-slate-400">Design, animate, and upload custom companion avatars in real-time.</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <a href="http://localhost:8000/docs" target="_blank" class="text-xs text-slate-400 hover:text-white transition font-mono border border-slate-800 px-3 py-1.5 rounded-lg bg-slate-950/40">API Docs</a>
+      <button onclick="window.close()" class="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition px-3 py-1.5 rounded-lg">Exit Laboratory</button>
+    </div>
+  </header>
+
+  <!-- ─── MAIN CONTENT ─────────────────────────────────────────── -->
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch min-h-0">
+
+    <!-- ─── SIDEBAR: PALETTES & CONVERTER (COL 1-3) ─────────────── -->
+    <section class="lg:col-span-3 flex flex-col gap-6">
+
+      <!-- PALETTE CARD -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col gap-4">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <span>🎨</span> Palette Library
+        </h2>
+        
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5 font-medium">Color Scheme</label>
+          <select id="paletteSelect" onchange="changePalette()" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500">
+            <option value="cyber">Cyber Neon (Recommended)</option>
+            <option value="pastel">Pastel Dream</option>
+            <option value="nes">Retro NES</option>
+            <option value="gameboy">Classic GameBoy</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-2 font-medium">Active Swatches</label>
+          <div id="swatchesContainer" class="grid grid-cols-4 gap-2">
+            <!-- Swatches will be generated here -->
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between border-t border-slate-800/80 pt-3">
+          <label class="text-xs text-slate-400 font-medium">Custom Color</label>
+          <input type="color" id="customColorPicker" onchange="selectCustomColor()" class="w-8 h-8 rounded cursor-pointer border border-slate-700 bg-transparent" />
+        </div>
+      </div>
+
+      <!-- IMAGE CONVERTER CARD -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col gap-4">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <span>📸</span> Image to Pixel Converter
+        </h2>
+        <p class="text-xs text-slate-400">Upload a PNG or JPG and instantly convert it to pixel art.</p>
+        
+        <label id="dropZone" ondragover="event.preventDefault(); event.stopPropagation();" ondrop="handleDrop(event)" class="border-2 border-dashed border-slate-700 hover:border-indigo-500/50 rounded-xl p-6 text-center cursor-pointer transition bg-slate-950/20 block relative">
+          <input type="file" id="fileInput" onchange="handleFile(event)" class="hidden" accept="image/*" />
+          <div id="dropZoneContent" class="w-full h-full">
+            <span class="text-2xl mb-1 block">📥</span>
+            <span class="text-xs font-semibold text-slate-300 block hover:text-white">Choose a photo</span>
+            <span class="text-[10px] text-slate-500">or drag & drop it here</span>
+          </div>
+        </label>
+
+        <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+          <div>
+            <label class="block text-[10px] text-slate-500 mb-1">Target Grid</label>
+            <select id="convertResolution" class="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-slate-300 outline-none">
+              <option value="16">16 x 16</option>
+              <option value="32">32 x 32</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-1.5 mt-4">
+            <input type="checkbox" id="quantizeCheck" checked class="rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500" />
+            <label for="quantizeCheck" class="text-[10px] text-slate-400 select-none">Snap to Palette</label>
+          </div>
+        </div>
+
+        <button onclick="convertImage()" id="convertBtn" disabled class="w-full text-xs font-bold bg-indigo-600/50 hover:bg-indigo-600 text-white disabled:opacity-40 disabled:cursor-not-allowed py-2 rounded-lg transition mt-2">
+          Convert & Load Art
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ─── EDITOR AREA (COL 4-9) ────────────────────────────────── -->
+    <section class="lg:col-span-6 flex flex-col gap-6">
+
+      <!-- CANVAS PANEL -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col flex-1 min-h-0 justify-between items-center relative">
+        <!-- Tools Overlay -->
+        <div class="absolute left-4 top-4 flex flex-col gap-2 bg-slate-950/60 border border-slate-800 rounded-xl p-2 z-10">
+          <button onclick="setTool('pencil')" id="tool-pencil" class="p-2 bg-indigo-500 text-white rounded-lg transition hover:scale-105" title="Pencil (Draw)">✏️</button>
+          <button onclick="setTool('bucket')" id="tool-bucket" class="p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105" title="Paint Bucket (Fill)">🪣</button>
+          <button onclick="setTool('eraser')" id="tool-eraser" class="p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105" title="Eraser">🧹</button>
+          <div class="w-6 border-b border-slate-800 my-1 self-center"></div>
+          <button onclick="undo()" class="p-2 hover:bg-slate-800 rounded-lg transition text-sm" title="Undo">↩️</button>
+          <button onclick="redo()" class="p-2 hover:bg-slate-800 rounded-lg transition text-sm" title="Redo">↪️</button>
+          <button onclick="clearGrid()" class="p-2 hover:bg-slate-800 rounded-lg text-rose-400 hover:text-rose-300 transition text-sm" title="Clear Canvas">🗑️</button>
+        </div>
+
+        <!-- Resolution & Grid Controls Overlay (Right Top) -->
+        <div class="absolute right-4 top-4 flex items-center gap-2 bg-slate-950/60 border border-slate-800 rounded-xl p-1.5 z-10 text-xs font-mono">
+          <button onclick="changeResolution(16)" id="grid-btn-16" class="px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition">16x16</button>
+          <button onclick="changeResolution(32)" id="grid-btn-32" class="px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition">32x32</button>
+        </div>
+
+        <!-- Symmetrical Transform Tools Overlay (Right Side) -->
+        <div class="absolute right-4 bottom-14 flex flex-col gap-2 bg-slate-950/60 border border-slate-800 rounded-xl p-2 z-10 text-xs">
+          <button onclick="flipHorizontal()" class="p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105 font-mono text-center font-bold text-slate-300 hover:text-white" title="Flip Horizontal">↔️ H</button>
+          <button onclick="flipVertical()" class="p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105 font-mono text-center font-bold text-slate-300 hover:text-white" title="Flip Vertical">↕️ V</button>
+          <button onclick="rotate90()" class="p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105 text-center text-slate-300 hover:text-white" title="Rotate 90°">🔄 90°</button>
+          <div class="w-6 border-b border-slate-800 my-1 self-center"></div>
+          <div class="grid grid-cols-2 gap-1 text-[10px]">
+            <button onclick="shiftGrid(-1, 0)" class="p-1.5 hover:bg-slate-800 rounded transition font-bold text-slate-300 hover:text-white" title="Shift Left">⬅️</button>
+            <button onclick="shiftGrid(1, 0)" class="p-1.5 hover:bg-slate-800 rounded transition font-bold text-slate-300 hover:text-white" title="Shift Right">➡️</button>
+            <button onclick="shiftGrid(0, -1)" class="p-1.5 hover:bg-slate-800 rounded transition font-bold text-slate-300 hover:text-white" title="Shift Up">⬆️</button>
+            <button onclick="shiftGrid(0, 1)" class="p-1.5 hover:bg-slate-800 rounded transition font-bold text-slate-300 hover:text-white" title="Shift Down">⬇️</button>
+          </div>
+        </div>
+
+        <!-- The Pixel Editor Canvas -->
+        <div class="flex-1 flex items-center justify-center p-6 w-full min-h-0">
+          <div class="relative border-4 border-slate-950 rounded-2xl overflow-hidden shadow-2xl bg-[#090b11]">
+            <!-- Checkerboard background behind transparent pixels -->
+            <div class="absolute inset-0 opacity-15" style="background-image: radial-gradient(#6366f1 1px, transparent 0), radial-gradient(#6366f1 1px, transparent 0); background-size: 8px 8px; background-position: 0 0, 4px 4px;"></div>
+            <canvas id="editorCanvas" width="400" height="400" class="relative block cursor-crosshair max-w-full max-h-[400px]"></canvas>
+          </div>
+        </div>
+
+        <!-- Grid lines toggler & status info -->
+        <div class="w-full flex items-center justify-between text-xs text-slate-400 mt-2">
+          <div class="flex items-center gap-4">
+            <button onclick="toggleGridLines()" class="hover:text-white transition">🌐 Toggle Grid</button>
+            <button onclick="toggleOnionSkin()" id="onionBtn" class="hover:text-white transition text-slate-500">🧅 Onion Skin</button>
+            <span id="canvasStatusText" class="font-mono text-[10px] text-slate-500">16x16 Grid │ Tool: Pencil</span>
+          </div>
+          <span id="saveWarning" class="text-rose-400/80 animate-pulse font-mono hidden">Unsaved Changes!</span>
+        </div>
+      </div>
+
+      <!-- TIMELINE PANEL (Bottom) -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col gap-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <span>🎞️</span> Frame Animation Timeline
+          </h2>
+          <div class="flex items-center gap-2">
+            <button onclick="addFrame()" class="text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded transition">+ Add</button>
+            <button onclick="copyFrame()" class="text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded transition">Copy</button>
+            <button onclick="deleteFrame()" class="text-xs font-semibold bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 px-2.5 py-1 rounded transition">Delete</button>
+          </div>
+        </div>
+
+        <div id="timelineContainer" class="flex gap-3 overflow-x-auto py-2 pr-2 custom-scrollbar items-center min-h-[72px]">
+          <!-- Filmstrip frame previews will be injected here dynamically -->
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ─── PREVIEW & EXPORT (COL 10-12) ─────────────── -->
+    <section class="lg:col-span-3 flex flex-col gap-6">
+
+      <!-- PREVIEW LOOP CARD -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col gap-4 items-center">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider self-start flex items-center gap-2">
+          <span>👀</span> Live Loop Preview
+        </h2>
+
+        <div class="relative w-32 h-32 border border-slate-800 rounded-xl overflow-hidden bg-slate-950 flex items-center justify-center p-2">
+          <div class="absolute inset-0 opacity-5" style="background-image: radial-gradient(#6366f1 1px, transparent 0), radial-gradient(#6366f1 1px, transparent 0); background-size: 8px 8px; background-position: 0 0, 4px 4px;"></div>
+          <canvas id="previewCanvas" width="128" height="128" class="w-full h-full block"></canvas>
+        </div>
+
+        <div class="w-full flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <button onclick="togglePlayback()" id="playBtn" class="flex-1 py-1 bg-slate-800 hover:bg-slate-700 transition rounded text-xs font-semibold text-white">⏸️ Pause</button>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+              <span>Playback Speed</span>
+              <span id="speedVal" class="font-mono text-indigo-400">4 FPS</span>
+            </div>
+            <input type="range" id="speedSlider" min="1" max="12" value="4" oninput="changePreviewSpeed()" class="w-full accent-indigo-500 h-1 bg-slate-800 rounded-lg outline-none" />
+          </div>
+        </div>
+      </div>
+
+      <!-- SAVE & BEHAVIOR MAPPING CARD -->
+      <div class="glass-card rounded-2xl p-5 flex flex-col gap-4">
+        <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <span>⚙️</span> Behavior & Deployment
+        </h2>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5 font-medium">Pet Profile Name</label>
+          <input type="text" id="petNameInput" value="My Custom Pet" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500" />
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1.5 font-medium">Assign Animation Loop To</label>
+          <select id="stateMappingSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-indigo-500">
+            <option value="idle_loop">Idle Loop (Normal/Standby)</option>
+            <option value="focus_mode_active">Focus Active (Working)</option>
+            <option value="nagging_mild">Nagging Mild (Procrastinating)</option>
+            <option value="nagging_severe">Nagging Severe (Near Deadline)</option>
+            <option value="celebrating">Celebrating (Task Done!)</option>
+          </select>
+          <p class="text-[10px] text-slate-500 mt-1">Saves the current frame sequence to this specific supervisor state.</p>
+        </div>
+
+        <div class="border-t border-slate-800/80 my-2 pt-4 flex flex-col gap-2.5">
+          <button onclick="deployPet()" class="w-full py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/10 transition duration-200 flex items-center justify-center gap-2 text-xs">
+            ⚡ Save & Deploy to Pet
+          </button>
+          
+          <div class="grid grid-cols-2 gap-2 mt-1">
+            <button onclick="exportJSON()" class="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded text-xs transition">💾 Download JSON</button>
+            <button onclick="triggerImport()" class="py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded text-xs transition">📂 Upload JSON</button>
+          </div>
+          <input type="file" id="importInput" onchange="importJSON(event)" class="hidden" accept=".json" />
+        </div>
+
+        <div id="saveStatus" class="text-center text-xs font-semibold py-1 rounded hidden"></div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- ─── JAVASCRIPT LOGIC ──────────────────────────────────────── -->
+  <script>
+    // ─── EDITOR STATE ───────────────────────────────────────────
+    let resolution = 16;      // 16 or 32
+    let currentFrameIndex = 0;
+    // An array of frames, each frame is an array of hex colors. length = resolution * resolution
+    let frames = [createEmptyFrame(16)];
+    let undoStack = [cloneFrames(frames)];
+    let redoStack = [];
+    
+    let activeTool = 'pencil'; // 'pencil', 'bucket', 'eraser'
+    let showGridLines = true;
+    let selectedColor = '#8b5cf6'; // default purple swatch
+    let customColor = '#8b5cf6';
+    let isDrawing = false;
+    let previewTimer = null;
+    let isPlaying = true;
+    let importedImage = null;
+
+    // Palette Configurations
+    const PALETTES = {
+      cyber: ['#0f172a', '#38bdf8', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#f8fafc'],
+      pastel: ['#fbcfe8', '#c084fc', '#818cf8', '#93c5fd', '#a7f3d0', '#fef08a', '#ffedd5', '#ffffff'],
+      nes: ['#000000', '#ffffff', '#e60012', '#00a0e9', '#fff100', '#009944', '#e4007f', '#f39800'],
+      gameboy: ['#0f380f', '#306230', '#8bac0f', '#9bbc0f', '#000000', '#ffffff']
+    };
+    let activePaletteName = 'cyber';
+
+    // UI Elements
+    const editorCanvas = document.getElementById('editorCanvas');
+    const editorCtx = editorCanvas.getContext('2d');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const previewCtx = previewCanvas.getContext('2d');
+
+    // ─── INITIALIZATION ────────────────────────────────────────
+    window.addEventListener('load', () => {
+      generateSwatches();
+      drawEditor();
+      updateTimeline();
+      startPreviewLoop();
+      setTool('pencil');
+    });
+
+    // ─── DATA UTILITIES ────────────────────────────────────────
+    function createEmptyFrame(res) {
+      return Array(res * res).fill('');
+    }
+
+    function cloneFrames(src) {
+      return src.map(frame => [...frame]);
+    }
+
+    // ─── RESOLUTION SWITCHER ──────────────────────────────────
+    function changeResolution(newRes) {
+      if (resolution === newRes) return;
+      if (confirm(`Change resolution to ${newRes}x16? This will clear your current canvas edits.`)) {
+        resolution = newRes;
+        currentFrameIndex = 0;
+        frames = [createEmptyFrame(newRes)];
+        undoStack = [cloneFrames(frames)];
+        redoStack = [];
+        
+        // Update Buttons
+        document.getElementById('grid-btn-16').className = newRes === 16 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+        document.getElementById('grid-btn-32').className = newRes === 32 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+        
+        document.getElementById('canvasStatusText').innerText = `${newRes}x${newRes} Grid │ Tool: ${activeTool.toUpperCase()}`;
+        
+        drawEditor();
+        updateTimeline();
+      }
+    }
+
+    // ─── PALETTE FUNCTIONS ──────────────────────────────────────
+    function generateSwatches() {
+      const container = document.getElementById('swatchesContainer');
+      container.innerHTML = '';
+      const colors = PALETTES[activePaletteName];
+      colors.forEach((c, idx) => {
+        const btn = document.createElement('button');
+        btn.style.backgroundColor = c || 'transparent';
+        btn.className = `w-full h-8 rounded-lg border-2 transition hover:scale-105 active:scale-95 ${c === selectedColor ? 'border-indigo-400 ring-2 ring-indigo-500/30' : 'border-slate-800'}`;
+        btn.onclick = () => selectSwatch(c, btn);
+        btn.title = c || 'Transparent';
+        container.appendChild(btn);
+      });
+      // Default select first swatch
+      if (colors.length > 0) {
+        selectedColor = colors[1]; // Pick second color (usually non-dark color)
+      }
+    }
+
+    function selectSwatch(color, buttonElement) {
+      selectedColor = color;
+      // Reset swatch borders
+      const swatches = document.getElementById('swatchesContainer').children;
+      for (let s of swatches) {
+        s.className = 'w-full h-8 rounded-lg border-2 border-slate-800 transition hover:scale-105 active:scale-95';
+      }
+      if (buttonElement) {
+        buttonElement.className = 'w-full h-8 rounded-lg border-2 border-indigo-400 ring-2 ring-indigo-500/30 transition hover:scale-105 active:scale-95';
+      }
+      document.getElementById('customColorPicker').value = color;
+    }
+
+    function selectCustomColor() {
+      const color = document.getElementById('customColorPicker').value;
+      customColor = color;
+      selectedColor = color;
+      
+      // Clear swatch borders
+      const swatches = document.getElementById('swatchesContainer').children;
+      for (let s of swatches) {
+        s.className = 'w-full h-8 rounded-lg border-2 border-slate-800 transition hover:scale-105';
+      }
+    }
+
+    function changePalette() {
+      activePaletteName = document.getElementById('paletteSelect').value;
+      generateSwatches();
+    }
+
+    // ─── DRAWING LOGIC ──────────────────────────────────────────
+    function setTool(tool) {
+      activeTool = tool;
+      document.getElementById('tool-pencil').className = tool === 'pencil' ? 'p-2 bg-indigo-500 text-white rounded-lg transition hover:scale-105' : 'p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105';
+      document.getElementById('tool-bucket').className = tool === 'bucket' ? 'p-2 bg-indigo-500 text-white rounded-lg transition hover:scale-105' : 'p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105';
+      document.getElementById('tool-eraser').className = tool === 'eraser' ? 'p-2 bg-indigo-500 text-white rounded-lg transition hover:scale-105' : 'p-2 hover:bg-slate-800 rounded-lg transition hover:scale-105';
+      
+      document.getElementById('canvasStatusText').innerText = `${resolution}x${resolution} Grid │ Tool: ${tool.toUpperCase()}`;
+    }
+
+    function pushState() {
+      undoStack.push(cloneFrames(frames));
+      redoStack = []; // Clear redo stack on new action
+      document.getElementById('saveWarning').classList.remove('hidden');
+    }
+
+    function undo() {
+      if (undoStack.length > 1) {
+        redoStack.push(cloneFrames(frames));
+        undoStack.pop(); // Remove current state
+        frames = cloneFrames(undoStack[undoStack.length - 1]);
+        drawEditor();
+        updateTimeline();
+      }
+    }
+
+    function redo() {
+      if (redoStack.length > 0) {
+        const nextState = redoStack.pop();
+        undoStack.push(cloneFrames(nextState));
+        frames = cloneFrames(nextState);
+        drawEditor();
+        updateTimeline();
+      }
+    }
+
+    function clearGrid() {
+      pushState();
+      frames[currentFrameIndex] = createEmptyFrame(resolution);
+      drawEditor();
+      updateTimeline();
+    }
+
+    function toggleGridLines() {
+      showGridLines = !showGridLines;
+      drawEditor();
+    }
+
+    // Canvas Mouse Listeners
+    editorCanvas.addEventListener('mousedown', (e) => {
+      isDrawing = true;
+      pushState();
+      drawPixelAt(e);
+    });
+
+    editorCanvas.addEventListener('mousemove', (e) => {
+      if (isDrawing) {
+        drawPixelAt(e);
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDrawing = false;
+    });
+
+    function drawPixelAt(e) {
+      const rect = editorCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const col = Math.floor((x / rect.width) * resolution);
+      const row = Math.floor((y / rect.height) * resolution);
+      
+      if (col >= 0 && col < resolution && row >= 0 && row < resolution) {
+        const pixelIdx = row * resolution + col;
+        const currentFrame = frames[currentFrameIndex];
+        
+        if (activeTool === 'pencil') {
+          currentFrame[pixelIdx] = selectedColor;
+        } else if (activeTool === 'eraser') {
+          currentFrame[pixelIdx] = '';
+        } else if (activeTool === 'bucket') {
+          floodFill(col, row, currentFrame[pixelIdx], selectedColor);
+        }
+        
+        drawEditor();
+      }
+    }
+
+    function floodFill(startCol, startRow, targetColor, replacementColor) {
+      if (targetColor === replacementColor) return;
+      const currentFrame = frames[currentFrameIndex];
+      const queue = [[startCol, startRow]];
+      
+      while (queue.length > 0) {
+        const [c, r] = queue.shift();
+        const idx = r * resolution + c;
+        
+        if (currentFrame[idx] === targetColor) {
+          currentFrame[idx] = replacementColor;
+          
+          if (c > 0) queue.push([c - 1, r]);
+          if (c < resolution - 1) queue.push([c + 1, r]);
+          if (r > 0) queue.push([c, r - 1]);
+          if (r < resolution - 1) queue.push([c, r + 1]);
+        }
+      }
+    }
+
+    let showOnionSkin = false;
+    function toggleOnionSkin() {
+      showOnionSkin = !showOnionSkin;
+      const btn = document.getElementById('onionBtn');
+      if (btn) {
+        btn.className = showOnionSkin ? 'hover:text-white transition text-indigo-400 font-bold' : 'hover:text-white transition text-slate-500';
+      }
+      drawEditor();
+    }
+
+    // ─── RENDER EDITOR CANVAS ─────────────────────────────────
+    function drawEditor() {
+      const cellWidth = editorCanvas.width / resolution;
+      const cellHeight = editorCanvas.height / resolution;
+      editorCtx.clearRect(0, 0, editorCanvas.width, editorCanvas.height);
+      
+      // 1. Draw Onion Skin (Previous Frame) if enabled
+      if (showOnionSkin && currentFrameIndex > 0) {
+        const prevFrame = frames[currentFrameIndex - 1];
+        editorCtx.globalAlpha = 0.25; // 25% opacity
+        for (let r = 0; r < resolution; r++) {
+          for (let c = 0; c < resolution; c++) {
+            const idx = r * resolution + c;
+            const color = prevFrame[idx];
+            if (color) {
+              editorCtx.fillStyle = color;
+              editorCtx.fillRect(c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+            }
+          }
+        }
+        editorCtx.globalAlpha = 1.0; // reset
+      }
+
+      // 2. Draw Current Frame
+      const currentFrame = frames[currentFrameIndex];
+      for (let r = 0; r < resolution; r++) {
+        for (let c = 0; c < resolution; c++) {
+          const idx = r * resolution + c;
+          const color = currentFrame[idx];
+          
+          if (color) {
+            editorCtx.fillStyle = color;
+            editorCtx.fillRect(c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+          }
+          
+          // Grid lines
+          if (showGridLines) {
+            editorCtx.strokeStyle = 'rgba(99, 102, 241, 0.08)';
+            editorCtx.lineWidth = 0.5;
+            editorCtx.strokeRect(c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+          }
+        }
+      }
+    }
+
+
+    // ─── TRANSFORM FUNCTIONS ─────────────────────────────────────
+    function flipHorizontal() {
+      pushState();
+      const current = frames[currentFrameIndex];
+      for (let r = 0; r < resolution; r++) {
+        const rowStart = r * resolution;
+        for (let c = 0; c < Math.floor(resolution / 2); c++) {
+          const idx1 = rowStart + c;
+          const idx2 = rowStart + (resolution - 1 - c);
+          const temp = current[idx1];
+          current[idx1] = current[idx2];
+          current[idx2] = temp;
+        }
+      }
+      drawEditor();
+      updateTimeline();
+    }
+
+    function flipVertical() {
+      pushState();
+      const current = frames[currentFrameIndex];
+      for (let r = 0; r < Math.floor(resolution / 2); r++) {
+        const rowStart1 = r * resolution;
+        const rowStart2 = (resolution - 1 - r) * resolution;
+        for (let c = 0; c < resolution; c++) {
+          const idx1 = rowStart1 + c;
+          const idx2 = rowStart2 + c;
+          const temp = current[idx1];
+          current[idx1] = current[idx2];
+          current[idx2] = temp;
+        }
+      }
+      drawEditor();
+      updateTimeline();
+    }
+
+    function rotate90() {
+      pushState();
+      const current = frames[currentFrameIndex];
+      const next = Array(resolution * resolution).fill('');
+      for (let r = 0; r < resolution; r++) {
+        for (let c = 0; c < resolution; c++) {
+          const srcIdx = r * resolution + c;
+          const destIdx = c * resolution + (resolution - 1 - r);
+          next[destIdx] = current[srcIdx];
+        }
+      }
+      frames[currentFrameIndex] = next;
+      drawEditor();
+      updateTimeline();
+    }
+
+    function shiftGrid(dx, dy) {
+      pushState();
+      const current = frames[currentFrameIndex];
+      const next = Array(resolution * resolution).fill('');
+      for (let r = 0; r < resolution; r++) {
+        for (let c = 0; c < resolution; c++) {
+          const nr = (r + dy + resolution) % resolution;
+          const nc = (c + dx + resolution) % resolution;
+          next[nr * resolution + nc] = current[r * resolution + c];
+        }
+      }
+      frames[currentFrameIndex] = next;
+      drawEditor();
+      updateTimeline();
+    }
+
+    // ─── TIMELINE FRAME MANAGER ───────────────────────────────
+    function updateTimeline() {
+      const container = document.getElementById('timelineContainer');
+      container.innerHTML = '';
+      
+      frames.forEach((frame, idx) => {
+        const div = document.createElement('div');
+        div.className = `flex-shrink-0 w-14 h-14 rounded-lg relative overflow-hidden border-2 cursor-pointer transition ${idx === currentFrameIndex ? 'border-indigo-400 bg-indigo-500/10' : 'border-slate-800 bg-slate-900/40 hover:border-slate-700'}`;
+        div.onclick = () => selectFrame(idx);
+        
+        // Render mini frame canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = 48;
+        canvas.height = 48;
+        canvas.className = 'w-full h-full';
+        const ctx = canvas.getContext('2d');
+        const cell = 48 / resolution;
+        
+        frame.forEach((color, pIdx) => {
+          if (color) {
+            const r = Math.floor(pIdx / resolution);
+            const c = pIdx % resolution;
+            ctx.fillStyle = color;
+            ctx.fillRect(c * cell, r * cell, cell, cell);
+          }
+        });
+        
+        div.appendChild(canvas);
+        
+        // Label
+        const badge = document.createElement('span');
+        badge.className = 'absolute bottom-0.5 right-1 text-[8px] font-mono font-bold text-slate-400';
+        badge.innerText = `#${idx + 1}`;
+        div.appendChild(badge);
+        
+        container.appendChild(div);
+      });
+    }
+
+    function selectFrame(idx) {
+      currentFrameIndex = idx;
+      drawEditor();
+      updateTimeline();
+    }
+
+    function addFrame() {
+      pushState();
+      const current = frames[currentFrameIndex] || createEmptyFrame(resolution);
+      frames.splice(currentFrameIndex + 1, 0, [...current]);
+      currentFrameIndex++;
+      drawEditor();
+      updateTimeline();
+    }
+
+    function copyFrame() {
+      pushState();
+      const current = frames[currentFrameIndex];
+      frames.splice(currentFrameIndex + 1, 0, [...current]);
+      currentFrameIndex++;
+      drawEditor();
+      updateTimeline();
+    }
+
+    function deleteFrame() {
+      if (frames.length > 1) {
+        pushState();
+        frames.splice(currentFrameIndex, 1);
+        if (currentFrameIndex >= frames.length) {
+          currentFrameIndex = frames.length - 1;
+        }
+        drawEditor();
+        updateTimeline();
+      }
+    }
+
+    // ─── LIVE ANIMATION PREVIEW LOOP ──────────────────────────
+    let previewFrameIndex = 0;
+    
+    function startPreviewLoop() {
+      if (previewTimer) clearInterval(previewTimer);
+      
+      const speedSlider = document.getElementById('speedSlider');
+      const fps = parseInt(speedSlider.value);
+      const intervalMs = 1000 / fps;
+      
+      previewTimer = setInterval(() => {
+        if (!isPlaying || frames.length === 0) return;
+        
+        previewFrameIndex = (previewFrameIndex + 1) % frames.length;
+        renderPreviewFrame(previewFrameIndex);
+      }, intervalMs);
+    }
+
+    function renderPreviewFrame(frameIdx) {
+      const frame = frames[frameIdx];
+      if (!frame) return;
+      
+      previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+      const cellWidth = previewCanvas.width / resolution;
+      const cellHeight = previewCanvas.height / resolution;
+      
+      for (let i = 0; i < frame.length; i++) {
+        const color = frame[i];
+        if (color) {
+          const r = Math.floor(i / resolution);
+          const c = i % resolution;
+          previewCtx.fillStyle = color;
+          previewCtx.fillRect(c * cellWidth, r * cellHeight, cellWidth, cellHeight);
+        }
+      }
+    }
+
+    function changePreviewSpeed() {
+      const slider = document.getElementById('speedSlider');
+      document.getElementById('speedVal').innerText = `${slider.value} FPS`;
+      startPreviewLoop();
+    }
+
+    function togglePlayback() {
+      isPlaying = !isPlaying;
+      document.getElementById('playBtn').innerText = isPlaying ? '⏸️ Pause' : '▶️ Play';
+    }
+
+    // ─── IMAGE UPLOADER & RETRO PIXEL CONVERTER ───────────────
+    function handleDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const files = e.dataTransfer.files;
+      if (files.length > 0) {
+        loadImage(files[0]);
+      }
+    }
+
+    function handleFile(e) {
+      const files = e.target.files;
+      if (files.length > 0) {
+        loadImage(files[0]);
+      }
+    }
+
+    function loadImage(file) {
+      if (!file.type.startsWith('image/')) {
+        alert("Please drop/select a valid image file.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          importedImage = img;
+          document.getElementById('dropZone').className = 'border-2 border-solid border-indigo-500 rounded-xl p-6 text-center cursor-pointer transition bg-indigo-500/5 block relative';
+          document.getElementById('dropZoneContent').innerHTML = `
+            <span class="text-xs text-indigo-400 font-semibold block">✓ Image Loaded</span>
+            <span class="text-[10px] text-slate-400 block">${file.name}</span>
+            <span class="text-[9px] text-slate-500 mt-2 block">Click or drop to replace</span>
+          `;
+          document.getElementById('convertBtn').disabled = false;
+          // Reset file input value so we can select/load the same file again if needed
+          document.getElementById('fileInput').value = "";
+        };
+        img.onerror = () => {
+          alert("Failed to parse image file. Please choose another image.");
+          document.getElementById('fileInput').value = "";
+        };
+        img.src = event.target.result;
+      };
+      reader.onerror = () => {
+        alert("Failed to read image file.");
+        document.getElementById('fileInput').value = "";
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function convertImage() {
+      if (!importedImage) return;
+      pushState();
+      
+      const targetRes = parseInt(document.getElementById('convertResolution').value);
+      const quantize = document.getElementById('quantizeCheck').checked;
+      
+      // Make a temporary canvas to get the full-res image data
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = importedImage.naturalWidth || importedImage.width || 300;
+      tempCanvas.height = importedImage.naturalHeight || importedImage.height || 300;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(importedImage, 0, 0);
+      
+      const imgData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+      const pixels = imgData.data;
+      const w = tempCanvas.width;
+      const h = tempCanvas.height;
+      
+      const newFrame = [];
+      const palette = PALETTES[activePaletteName];
+      
+      const cellW = w / targetRes;
+      const cellH = h / targetRes;
+      
+      for (let r = 0; r < targetRes; r++) {
+        for (let c = 0; c < targetRes; c++) {
+          const xStart = Math.floor(c * cellW);
+          const xEnd = Math.floor((c + 1) * cellW);
+          const yStart = Math.floor(r * cellH);
+          const yEnd = Math.floor((r + 1) * cellH);
+          
+          let totalR = 0, totalG = 0, totalB = 0, totalA = 0;
+          let count = 0;
+          
+          for (let y = yStart; y < yEnd; y++) {
+            for (let x = xStart; x < xEnd; x++) {
+              if (x >= 0 && x < w && y >= 0 && y < h) {
+                const pIdx = (y * w + x) * 4;
+                totalR += pixels[pIdx];
+                totalG += pixels[pIdx+1];
+                totalB += pixels[pIdx+2];
+                totalA += pixels[pIdx+3];
+                count++;
+              }
+            }
+          }
+          
+          const avgA = count > 0 ? (totalA / count) : 0;
+          
+          if (avgA < 120) {
+            newFrame.push(''); // Transparent
+          } else {
+            const avgR = Math.round(totalR / count);
+            const avgG = Math.round(totalG / count);
+            const avgB = Math.round(totalB / count);
+            const hexColor = rgbToHex(avgR, avgG, avgB);
+            
+            if (quantize) {
+              newFrame.push(findNearestPaletteColor(avgR, avgG, avgB, palette));
+            } else {
+              newFrame.push(hexColor);
+            }
+          }
+        }
+      }
+      
+      // Adjust Resolution grid editor if needed
+      resolution = targetRes;
+      currentFrameIndex = 0;
+      frames = [newFrame];
+      
+      // Update Grid select buttons
+      document.getElementById('grid-btn-16').className = resolution === 16 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+      document.getElementById('grid-btn-32').className = resolution === 32 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+      document.getElementById('canvasStatusText').innerText = `${resolution}x${resolution} Grid │ Tool: ${activeTool.toUpperCase()}`;
+      
+      drawEditor();
+      updateTimeline();
+    }
+
+    function rgbToHex(r, g, b) {
+      const toHex = (c) => c.toString(16).padStart(2, '0');
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    function findNearestPaletteColor(r, g, b, palette) {
+      let nearestColor = palette[0];
+      let minDistance = Infinity;
+      
+      palette.forEach(color => {
+        // Parse hex to RGB
+        const rgb = hexToRgb(color);
+        if (!rgb) return;
+        
+        const distance = Math.sqrt(
+          Math.pow(r - rgb.r, 2) +
+          Math.pow(g - rgb.g, 2) +
+          Math.pow(b - rgb.b, 2)
+        );
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestColor = color;
+        }
+      });
+      
+      return nearestColor;
+    }
+
+    function hexToRgb(hex) {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+      } : null;
+    }
+
+    // ─── DEPLOYMENT & REST API SAVES ────────────────────────────
+    async function deployPet() {
+      const name = document.getElementById('petNameInput').value.trim() || 'My Custom Pet';
+      const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const stateMapping = document.getElementById('stateMappingSelect').value;
+      const statusDiv = document.getElementById('saveStatus');
+      
+      statusDiv.className = 'text-center text-xs font-semibold py-1 rounded bg-indigo-500/10 text-indigo-400 block';
+      statusDiv.innerText = 'Deploying pet profile...';
+
+      // 1. Fetch existing pet profile first to merge other states if any
+      let currentStates = {};
+      try {
+        const response = await fetch("http://localhost:8000/api/v1/companion/pets");
+        if (response.ok) {
+          const data = await response.json();
+          const existing = data.pets.find(p => p.id === id);
+          if (existing) {
+            currentStates = existing.states || {};
+          }
+        }
+      } catch (err) {
+        console.warn("Could not retrieve existing custom pets, starting fresh.", err);
+      }
+
+      // 2. Prepare payload
+      const speedSlider = document.getElementById('speedSlider');
+      const speedFps = parseInt(speedSlider.value);
+      const speedMs = Math.round(1000 / speedFps);
+
+      // Save/Overwrite ONLY the targeted state
+      currentStates[stateMapping] = {
+        frames: cloneFrames(frames),
+        speed_ms: speedMs
+      };
+
+      const petPayload = {
+        id: id,
+        name: name,
+        type: 'custom',
+        states: currentStates
+      };
+
+      // 3. Post profile config to backend
+      try {
+        const petRes = await fetch("http://localhost:8000/api/v1/companion/pets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(petPayload)
+        });
+
+        if (!petRes.ok) {
+          throw new Error("Failed to upload custom pet configuration.");
+        }
+
+        // 4. Select this pet as the active companion pet
+        const selectRes = await fetch("http://localhost:8000/api/v1/companion/select-pet", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pet_id: id })
+        });
+
+        if (!selectRes.ok) {
+          throw new Error("Failed to select custom pet as active companion.");
+        }
+
+        statusDiv.className = 'text-center text-xs font-semibold py-1.5 rounded bg-emerald-500/10 text-emerald-400 block';
+        statusDiv.innerText = `⚡ Success! '${name}' deployed to companion.`;
+        document.getElementById('saveWarning').classList.add('hidden');
+        
+        setTimeout(() => {
+          statusDiv.classList.add('hidden');
+        }, 5000);
+
+      } catch (err) {
+        statusDiv.className = 'text-center text-xs font-semibold py-1.5 rounded bg-rose-500/10 text-rose-400 block';
+        statusDiv.innerText = `❌ Error: ${err.message}`;
+      }
+    }
+
+    // ─── IMPORT / EXPORT LOCAL JSON ─────────────────────────────
+    function exportJSON() {
+      const name = document.getElementById('petNameInput').value.trim() || 'My Custom Pet';
+      const id = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const speedSlider = document.getElementById('speedSlider');
+      const speedMs = Math.round(1000 / parseInt(speedSlider.value));
+      const stateMapping = document.getElementById('stateMappingSelect').value;
+
+      const data = {
+        id: id,
+        name: name,
+        resolution: resolution,
+        animation_speed_ms: speedMs,
+        state_mapping: stateMapping,
+        frames: frames
+      };
+
+      const jsonStr = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${id}_sprite.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function triggerImport() {
+      document.getElementById('importInput').click();
+    }
+
+    function importJSON(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const data = JSON.parse(event.target.result);
+          if (!data.frames || !data.resolution) {
+            alert('Invalid sprite sheet format: missing frames or resolution.');
+            return;
+          }
+
+          pushState();
+          resolution = data.resolution;
+          frames = data.frames;
+          currentFrameIndex = 0;
+          
+          if (data.name) document.getElementById('petNameInput').value = data.name;
+          if (data.state_mapping) document.getElementById('stateMappingSelect').value = data.state_mapping;
+          if (data.animation_speed_ms) {
+            const fps = Math.round(1000 / data.animation_speed_ms);
+            document.getElementById('speedSlider').value = fps;
+            document.getElementById('speedVal').innerText = `${fps} FPS`;
+          }
+
+          // Update Grid select buttons
+          document.getElementById('grid-btn-16').className = resolution === 16 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+          document.getElementById('grid-btn-32').className = resolution === 32 ? 'px-2.5 py-1 bg-indigo-500 text-white rounded font-bold transition' : 'px-2.5 py-1 hover:bg-slate-800 rounded text-slate-300 font-bold transition';
+          
+          drawEditor();
+          updateTimeline();
+          startPreviewLoop();
+
+          alert(`Successfully imported sprite sheet: '${data.name || 'Custom Pet'}'`);
+        } catch (err) {
+          alert('Failed to parse JSON file: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  </script>
+</body>
+</html>

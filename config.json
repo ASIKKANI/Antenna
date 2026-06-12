@@ -2,10 +2,13 @@
     "selected_provider": "ollama",
     "target_model_name": "openbmb/minicpm-v4.6:latest",
     "active_persona_profile": "zen",
+    "selected_pet_id": "my_custom_pet",
     "polling_frequency_seconds": 30,
     "authorized_phone_number": "918681980569",
     "gamification_level": 1,
-    "accumulated_experience": 0,
+    "accumulated_experience": 85,
+    "vision_enabled": true,
+    "vision_min_interval_seconds": 3010,
     "llm_fallback_models": [
         "ollama/openbmb/minicpm-v4.6:latest",
         "ollama/MiniCPM5-1B-Q4_K_M:latest"
@@ -23,7 +26,5 @@
         3000,
         4000,
         5500
-    ],
-    "vision_enabled": true,
-    "vision_min_interval_seconds": 3010
+    ]
 }
