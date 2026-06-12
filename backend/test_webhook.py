@@ -59,6 +59,23 @@ class TestTaskCRUD:
         resp = client.get("/api/v1/tasks")
         assert resp.status_code == 200
 
+    def test_create_task_direct(self, client):
+        """Direct task creation via POST endpoint is successful."""
+        resp = client.post(
+            "/api/v1/tasks",
+            json={
+                "clean_title": "Finish EDC assignment today",
+                "deadline_epoch": int(time.time()) + 7200,
+                "priority_level": "critical"
+            }
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "task_id" in data
+        assert data["clean_title"] == "Finish EDC assignment today"
+        assert data["priority_level"] == "critical"
+        assert data["status_state"] == "pending"
+
     def test_get_task_not_found(self, client):
         """Non-existent task returns 404."""
         resp = client.get("/api/v1/tasks/nonexistent-id")

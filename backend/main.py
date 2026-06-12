@@ -813,6 +813,55 @@ async def list_tasks(status_filter: Optional[str] = None):
     return {"tasks": [t.model_dump() for t in tasks], "total": len(tasks)}
 
 
+class TaskCreatePayload(BaseModel):
+    clean_title: str
+    deadline_epoch: Optional[int] = None
+    priority_level: Optional[str] = "medium"
+
+
+@app.post("/api/v1/tasks", status_code=status.HTTP_201_CREATED)
+async def create_task_direct(payload: TaskCreatePayload):
+    """Create a task directly from the Pet UI (PRD-aligned)."""
+    current_time = int(time.time())
+    new_task = TaskEntity(
+        task_id=str(uuid.uuid4()),
+        raw_source_text=f"Directly created via Pet UI: {payload.clean_title}",
+        clean_title=payload.clean_title,
+        deadline_epoch=payload.deadline_epoch or (current_time + 3600),
+        priority_level=payload.priority_level or "medium",
+        status_state="pending",
+    )
+    db_tasks[new_task.task_id] = new_task
+    logger.info(f"Task created via Pet UI: [{new_task.priority_level.upper()}] {new_task.clean_title}")
+
+    # Store in vector memory
+    try:
+        memory_db.embed_and_store(
+            text=new_task.raw_source_text,
+            metadata={
+                "task_id": new_task.task_id,
+                "clean_title": new_task.clean_title,
+                "deadline": new_task.deadline_epoch,
+                "priority": new_task.priority_level,
+                "status_state": new_task.status_state,
+                "created_at": new_task.created_at.timestamp(),
+            }
+        )
+    except Exception as ex:
+        logger.error(f"Failed to save direct task vector: {ex}")
+
+    # Broadcast to UI
+    await manager.broadcast_state(
+        build_companion_state(
+            animation="focus_mode_active",
+            dialogue=f"Target locked: {new_task.clean_title}",
+            focus=100,
+        )
+    )
+
+    return new_task.model_dump()
+
+
 @app.get("/api/v1/tasks/{task_id}")
 async def get_task(task_id: str):
     """Get a specific task by ID."""

@@ -23,6 +23,94 @@
   let uiOpacity = 85; // 0 to 100
   let ws: CompanionWebSocket | null = null;
 
+  // ─── Task Management State ─────────────────────────────────────
+  let activeTab: "core" | "tasks" = "core";
+  let tasks: any[] = [];
+  let newTaskTitle = "";
+  let newTaskPriority = "medium";
+  let newTaskDeadlineHours = 1;
+
+  async function fetchTasks() {
+    try {
+      const response = await fetch("http://localhost:8000/api/v1/tasks");
+      if (response.ok) {
+        const data = await response.json();
+        // Sort: active/pending first, then failed, then completed
+        const statusOrder: Record<string, number> = { active: 1, pending: 2, failed: 3, completed: 4 };
+        tasks = data.tasks.sort((a: any, b: any) => {
+          return (statusOrder[a.status_state] || 5) - (statusOrder[b.status_state] || 5);
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch tasks:", err);
+    }
+  }
+
+  async function addTask() {
+    if (!newTaskTitle.trim()) return;
+    try {
+      const deadlineEpoch = Math.floor(Date.now() / 1000) + (newTaskDeadlineHours * 3600);
+      const response = await fetch("http://localhost:8000/api/v1/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clean_title: newTaskTitle.trim(),
+          deadline_epoch: deadlineEpoch,
+          priority_level: newTaskPriority
+        })
+      });
+      if (response.ok) {
+        newTaskTitle = "";
+        await fetchTasks();
+      }
+    } catch (err) {
+      console.error("Failed to add task:", err);
+    }
+  }
+
+  async function completeTask(taskId: string) {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status_state: "completed" })
+      });
+      if (response.ok) {
+        await fetchTasks();
+      }
+    } catch (err) {
+      console.error("Failed to complete task:", err);
+    }
+  }
+
+  async function deleteTask(taskId: string) {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/tasks/${taskId}`, {
+        method: "DELETE"
+      });
+      if (response.ok) {
+        await fetchTasks();
+      }
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+    }
+  }
+
+  function formatDeadline(epoch: number): string {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = epoch - now;
+    if (diff < 0) return "Expired";
+    const hours = Math.floor(diff / 3600);
+    const mins = Math.floor((diff % 3600) / 60);
+    if (hours > 0) return `${hours}h ${mins}m left`;
+    return `${mins}m left`;
+  }
+
+  // Reactive trigger to fetch tasks on dashboard open
+  $: if (showDashboard) {
+    fetchTasks();
+  }
+
   // ─── Animation State Mapping ─────────────────────────────────
   $: animClass = getAnimationClass(companionState.display_animation_frame);
   $: evoClass = `evo-${companionState.evolution_stage}`;
@@ -210,50 +298,111 @@
         </div>
       </div>
 
-      <!-- ─── Stats Section ────────────────────────────────────── -->
-      <div class="stats-section">
-        <div class="stat-row">
-          <div class="stat-label">
-            <span class="stat-icon">◈</span>
-            <span>FOCUS</span>
-          </div>
-          <span class="stat-value" style="color: {focusBarColor};">{companionState.focus_points_balance} FP</span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill"
-               style="width: {companionState.focus_points_balance}%; background: {focusBarColor};">
-          </div>
-        </div>
-
-        <div class="stat-row" style="margin-top: 10px;">
-          <div class="stat-label">
-            <span class="stat-icon">✦</span>
-            <span>LEVEL {companionState.current_level}</span>
-          </div>
-          <span class="stat-value" style="color: var(--cp-accent-xp);">
-            {Math.round(companionState.experience_progress_percentage)}%
-          </span>
-        </div>
-        <div class="progress-track">
-          <div class="progress-fill xp-bar-fill"
-               style="width: {companionState.experience_progress_percentage}%;">
-          </div>
-        </div>
+      <!-- Tab Controls -->
+      <div class="tabs-row">
+        <button class="tab-btn" class:active={activeTab === 'core'} on:click={() => activeTab = 'core'}>📊 Core</button>
+        <button class="tab-btn" class:active={activeTab === 'tasks'} on:click={() => { activeTab = 'tasks'; fetchTasks(); }}>🎯 Tasks ({companionState.active_tasks_count})</button>
       </div>
 
-      <!-- ─── Active Tasks Count ───────────────────────────────── -->
-      <div class="tasks-bar">
-        <div class="tasks-bar-inner">
-          <span class="tasks-label">
-            {#if companionState.active_tasks_count > 0}
-              🎯 {companionState.active_tasks_count} active task{companionState.active_tasks_count !== 1 ? 's' : ''}
+      {#if activeTab === 'core'}
+        <!-- ─── Stats Section ────────────────────────────────────── -->
+        <div class="stats-section">
+          <div class="stat-row">
+            <div class="stat-label">
+              <span class="stat-icon">◈</span>
+              <span>FOCUS</span>
+            </div>
+            <span class="stat-value" style="color: {focusBarColor};">{companionState.focus_points_balance} FP</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill"
+                 style="width: {companionState.focus_points_balance}%; background: {focusBarColor};">
+            </div>
+          </div>
+
+          <div class="stat-row" style="margin-top: 10px;">
+            <div class="stat-label">
+              <span class="stat-icon">✦</span>
+              <span>LEVEL {companionState.current_level}</span>
+            </div>
+            <span class="stat-value" style="color: var(--cp-accent-xp);">
+              {Math.round(companionState.experience_progress_percentage)}%
+            </span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill xp-bar-fill"
+                 style="width: {companionState.experience_progress_percentage}%;">
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Active Tasks Count ───────────────────────────────── -->
+        <div class="tasks-bar">
+          <div class="tasks-bar-inner">
+            <span class="tasks-label">
+              {#if companionState.active_tasks_count > 0}
+                🎯 {companionState.active_tasks_count} active task{companionState.active_tasks_count !== 1 ? 's' : ''}
+              {:else}
+                💤 No active tasks
+              {/if}
+            </span>
+            <span class="state-label">{companionState.display_animation_frame}</span>
+          </div>
+        </div>
+      {:else}
+        <!-- ─── Tasks Section ────────────────────────────────────── -->
+        <div class="tasks-section">
+          <!-- Add Task Form -->
+          <div class="add-task-form">
+            <input type="text" placeholder="New task title..." bind:value={newTaskTitle} class="task-input" on:keydown={(e) => e.key === 'Enter' && addTask()} />
+            <div class="form-row">
+              <select bind:value={newTaskPriority} class="task-select">
+                <option value="low">Low Priority</option>
+                <option value="medium">Medium Priority</option>
+                <option value="high">High Priority</option>
+                <option value="critical">Critical</option>
+              </select>
+              <select bind:value={newTaskDeadlineHours} class="task-select">
+                <option value={0.5}>30 Mins</option>
+                <option value={1}>1 Hour</option>
+                <option value={2}>2 Hours</option>
+                <option value={4}>4 Hours</option>
+                <option value={8}>8 Hours</option>
+                <option value={24}>24 Hours</option>
+              </select>
+              <button class="add-btn" on:click={addTask}>Add</button>
+            </div>
+          </div>
+
+          <!-- Tasks List -->
+          <div class="tasks-list">
+            {#if tasks.length === 0}
+              <div class="empty-state">No tasks created yet.</div>
             {:else}
-              💤 No active tasks
+              {#each tasks as task (task.task_id)}
+                <div class="task-item" class:task-completed={task.status_state === 'completed'} class:task-failed={task.status_state === 'failed'}>
+                  <div class="task-info">
+                    <div class="task-title-row">
+                      <span class="badge badge-{task.priority_level}">{task.priority_level}</span>
+                      <span class="task-title" title={task.clean_title}>{task.clean_title}</span>
+                    </div>
+                    <div class="task-meta-row">
+                      <span class="task-status status-{task.status_state}">{task.status_state}</span>
+                      <span class="task-deadline">{formatDeadline(task.deadline_epoch)}</span>
+                    </div>
+                  </div>
+                  <div class="task-actions">
+                    {#if task.status_state === 'pending' || task.status_state === 'active'}
+                      <button class="task-action-btn complete-btn" on:click={() => completeTask(task.task_id)} title="Complete Task">✓</button>
+                    {/if}
+                    <button class="task-action-btn delete-btn" on:click={() => deleteTask(task.task_id)} title="Remove Task">✕</button>
+                  </div>
+                </div>
+              {/each}
             {/if}
-          </span>
-          <span class="state-label">{companionState.display_animation_frame}</span>
+          </div>
         </div>
-      </div>
+      {/if}
 
       <!-- ─── Controls & Footer ───────────────────────────────── -->
       <div class="footer-bar">
@@ -561,5 +710,220 @@
     animation: typewriter-blink 0.8s step-end infinite;
     font-size: 12px;
     margin-left: 1px;
+  }
+
+  /* ─── Task Manager Styles ──────────────────────────────────── */
+  .tabs-row {
+    display: flex;
+    border-bottom: 1px solid var(--cp-border);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 10px;
+    font-size: 11px;
+    font-family: var(--cp-font-mono);
+    text-align: center;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--cp-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn:hover {
+    color: var(--cp-text-primary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .tab-btn.active {
+    color: var(--cp-accent-glow);
+    border-bottom-color: var(--cp-accent);
+    background: rgba(99, 102, 241, 0.08);
+  }
+
+  .tasks-section {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 420px;
+    overflow: hidden;
+  }
+
+  .add-task-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--cp-border);
+    border-radius: var(--cp-radius-sm);
+    padding: 10px;
+  }
+
+  .task-input {
+    width: 100%;
+    background: var(--cp-bg-input);
+    border: 1px solid var(--cp-border);
+    border-radius: var(--cp-radius-xs);
+    padding: 6px 10px;
+    color: var(--cp-text-primary);
+    font-size: 12px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .task-input:focus {
+    border-color: var(--cp-border-active);
+  }
+
+  .form-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .task-select {
+    flex: 1;
+    background: var(--cp-bg-input);
+    border: 1px solid var(--cp-border);
+    border-radius: var(--cp-radius-xs);
+    padding: 4px 6px;
+    color: var(--cp-text-primary);
+    font-size: 11px;
+    outline: none;
+  }
+
+  .add-btn {
+    background: var(--cp-accent);
+    color: white;
+    border: none;
+    border-radius: var(--cp-radius-xs);
+    padding: 4px 14px;
+    font-size: 11px;
+    font-family: var(--cp-font-mono);
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .add-btn:hover {
+    background: var(--cp-accent-glow);
+  }
+
+  .tasks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    max-height: 240px;
+    padding-right: 4px;
+  }
+
+  .empty-state {
+    text-align: center;
+    font-size: 12px;
+    color: var(--cp-text-muted);
+    padding: 30px 0;
+  }
+
+  .task-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--cp-border);
+    border-radius: var(--cp-radius-sm);
+    padding: 8px 12px;
+    gap: 12px;
+    transition: all 0.2s;
+  }
+  .task-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--cp-border-active);
+  }
+  .task-completed {
+    opacity: 0.6;
+    background: rgba(16, 185, 129, 0.02);
+  }
+  .task-failed {
+    opacity: 0.7;
+    background: rgba(239, 68, 68, 0.02);
+    border-color: rgba(239, 68, 68, 0.15);
+  }
+
+  .task-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .task-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .task-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--cp-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .task-completed .task-title {
+    text-decoration: line-through;
+    color: var(--cp-text-muted);
+  }
+
+  .task-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--cp-text-secondary);
+  }
+
+  .task-status {
+    text-transform: uppercase;
+    font-family: var(--cp-font-mono);
+    font-weight: 600;
+  }
+  .status-active { color: var(--cp-accent-glow); }
+  .status-pending { color: var(--cp-text-secondary); }
+  .status-completed { color: var(--cp-accent-success); }
+  .status-failed { color: var(--cp-accent-danger); }
+
+  .task-deadline {
+    font-family: var(--cp-font-mono);
+    color: var(--cp-text-muted);
+  }
+
+  .task-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .task-action-btn {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--cp-radius-xs);
+    border: 1px solid var(--cp-border);
+    background: var(--cp-bg-input);
+    color: var(--cp-text-primary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .complete-btn:hover {
+    background: var(--cp-accent-success);
+    border-color: var(--cp-accent-success);
+    color: white;
+  }
+  .delete-btn:hover {
+    background: var(--cp-accent-danger);
+    border-color: var(--cp-accent-danger);
+    color: white;
   }
 </style>
