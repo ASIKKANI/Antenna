@@ -544,6 +544,28 @@ def load_tasks_from_vector_db():
         logger.warning("ChromaDB not ready, skipping task loading.")
         return
     
+    def parse_datetime(val) -> Optional[datetime]:
+        if val is None:
+            return None
+        if isinstance(val, (int, float)):
+            return datetime.fromtimestamp(val)
+        val_str = str(val).strip()
+        try:
+            return datetime.fromtimestamp(float(val_str))
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(val_str)
+        except ValueError:
+            pass
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                return datetime.strptime(val_str, fmt)
+            except ValueError:
+                continue
+        logger.warning(f"Could not parse datetime string: '{val}'. Defaulting to current time.")
+        return datetime.utcnow()
+
     try:
         results = memory_db.collection.get()
         ids = results.get("ids", [])
@@ -559,8 +581,8 @@ def load_tasks_from_vector_db():
             created_at_val = meta.get("created_at") or time.time()
             resolved_at_val = meta.get("resolved_at")
             
-            created_at_dt = datetime.fromtimestamp(float(created_at_val))
-            resolved_at_dt = datetime.fromtimestamp(float(resolved_at_val)) if resolved_at_val else None
+            created_at_dt = parse_datetime(created_at_val) or datetime.utcnow()
+            resolved_at_dt = parse_datetime(resolved_at_val)
             
             # Retrieve status: if not present, default to pending
             status_val = meta.get("status_state", "pending")
