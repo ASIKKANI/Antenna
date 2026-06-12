@@ -30,9 +30,10 @@ async def run_perception_agent(
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
     
     prompt = (
-        "Describe in one objective sentence what is visible on this desktop screen. "
-        "Mention specific open applications, websites, code files, or video games. "
-        "Do not make any value judgments or call things productive/distracting. Simply report the facts."
+        "Describe in one or two objective sentences what is visible on this desktop screen.\n"
+        "Be highly specific: identify and name visible document titles, PDF filenames (e.g. 'EDC_Assignment.pdf'), "
+        "browser tab names, website URLs or headers, code files, or applications/video games.\n"
+        "Do not make any value judgments. Simply report the objective facts of what is visible on the screen."
     )
     
     try:
@@ -94,8 +95,9 @@ async def run_cognitive_agent(
         f"Your active persona profile is: \"{persona}\" (cybernetic = cold, robotic, logical; rival = competitive, strict, nagging; zen = mindful, gentle, relaxed).\n\n"
         f"Judge the user's productivity status and determine compliance weights:\n"
         f"- status \"focused\" (d_weight = 0.0 to 0.1) if the user's action directly helps complete their tasks. "
-        f"Crucially, check for TASK-SPECIFIC COHERENCE: general productivity tools like coding in VS Code or running terminal commands are NOT productive if they do not match the specific subject of the active task. "
+        f"Crucially, check for TASK-SPECIFIC COHERENCE: general productivity tools like coding in VS Code, writing python/javascript/rust scripts, or running terminal commands are NOT productive if they do not match the specific subject of the active task. "
         f"For example, if the active task is \"edc assignment\", the user must be reading/writing EDC-related material (like an EDC PDF, EDC course website, or writing an EDC paper). Coding in an IDE on a python script or browsing random programming websites is NOT productive for a non-coding task.\n"
+        f"Check document titles, PDF filenames, browser tab titles, and visible text reported in the screen activity description to verify if they explicitly mention or relate to the active task subject.\n"
         f"- status \"distracted\" (d_weight = 0.8 to 1.0) if the user is gaming, on social media, watching entertainment, or working on entirely unrelated tasks while a deadline is near.\n"
         f"- status \"neutral\" (d_weight = 0.2 to 0.5) for general browsing, meetings, music, or ambiguous activities.\n\n"
         f"CRITICAL DEADLINE RATIONALIZATION:\n"

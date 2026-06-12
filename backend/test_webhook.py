@@ -162,6 +162,11 @@ class TestSentinelMath:
         d = evaluate_window_compliance("main.py - ChronosPet - Visual Studio Code", "Deploy server patch")
         assert d == 0.0
 
+    def test_window_compliance_non_coding_task_with_coding_tool(self):
+        """General coding tool on a non-coding task should be marked as non-productive (weight 0.6)."""
+        d = evaluate_window_compliance("main.py - ChronosPet - Visual Studio Code", "edc assignment")
+        assert d == 0.6
+
     def test_window_compliance_task_keywords(self):
         """Window matching task keywords → near-compliant."""
         d = evaluate_window_compliance("deploy_script.sh - Terminal", "Deploy server patch")

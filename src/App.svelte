@@ -16,6 +16,7 @@
   };
 
   let displayedDialogue = "";
+  let lastDismissedDialogue = "";
   let isTyping = false;
   let typewriterTimer: ReturnType<typeof setTimeout> | null = null;
   let showDashboard = false;
@@ -125,8 +126,13 @@
     ws = new CompanionWebSocket(
       (state) => {
         companionState = state;
-        if (state.active_bubble_dialogue && state.active_bubble_dialogue !== displayedDialogue) {
+        if (state.active_bubble_dialogue && 
+            state.active_bubble_dialogue !== displayedDialogue && 
+            state.active_bubble_dialogue !== lastDismissedDialogue) {
           typeDialogue(state.active_bubble_dialogue);
+        } else if (!state.active_bubble_dialogue) {
+          displayedDialogue = "";
+          lastDismissedDialogue = "";
         }
       },
       (status) => {
@@ -176,7 +182,7 @@
           <!-- Close button to dismiss dialogue bubble -->
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div class="bubble-close-btn" on:click={() => { displayedDialogue = ""; }} title="Dismiss">✕</div>
+          <div class="bubble-close-btn" on:click={() => { lastDismissedDialogue = companionState.active_bubble_dialogue; displayedDialogue = ""; }} title="Dismiss">✕</div>
         </div>
       </div>
     {/if}

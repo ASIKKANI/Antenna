@@ -453,14 +453,27 @@ def evaluate_window_compliance(
     if any(k in title_lower for k in DEVIANT_KEYWORDS):
         return 0.9
 
-    # Check compliant keywords
-    if any(k in title_lower for k in COMPLIANT_KEYWORDS):
-        return 0.0
-
     # Dynamic: check if any task-specific keywords appear in the window title
     task_keywords = extract_task_keywords(task_title)
     if task_keywords and any(k in title_lower for k in task_keywords):
         return 0.05
+
+    # Check if the active task is coding-related
+    coding_task_indicators = {
+        "code", "coding", "program", "programming", "develop", "development",
+        "implement", "implementation", "debug", "debugging", "python", "javascript",
+        "rust", "java", "cpp", "script", "project", "app", "website", "html", "css",
+        "backend", "frontend", "git", "github", "api", "database", "sql", "deploy", "patch", "server", "test", "build"
+    }
+    is_coding_task = any(kw in task_title.lower() for kw in coding_task_indicators)
+
+    # Check compliant keywords
+    if any(k in title_lower for k in COMPLIANT_KEYWORDS):
+        if is_coding_task:
+            return 0.0
+        else:
+            # Coding tool active for a non-coding task is not productive
+            return 0.6
 
     return NEUTRAL_WEIGHT
 

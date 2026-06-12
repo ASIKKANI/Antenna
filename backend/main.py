@@ -347,7 +347,17 @@ def run_local_heuristics_fallback(window_title: str, active_tasks: List[TaskEnti
     
     # Check task keywords compliance
     task_kws = extract_task_keywords(task_title)
-    is_compliant = any(kw in title_lower for kw in COMPLIANT_KEYWORDS) or (task_kws and any(kw in title_lower for kw in task_kws))
+    has_task_kw = task_kws and any(kw in title_lower for kw in task_kws)
+    
+    # Check if active task is coding-related
+    coding_task_indicators = {
+        "code", "coding", "program", "programming", "develop", "development",
+        "implement", "implementation", "debug", "debugging", "python", "javascript",
+        "rust", "java", "cpp", "script", "project", "app", "website", "html", "css",
+        "backend", "frontend", "git", "github", "api", "database", "sql", "deploy", "patch", "server", "test", "build"
+    }
+    is_coding_task = any(kw in task_title.lower() for kw in coding_task_indicators)
+    is_compliant_tool = any(kw in title_lower for kw in COMPLIANT_KEYWORDS)
     
     if is_deviant or is_youtube:
         # Check deadline urgency
@@ -365,12 +375,25 @@ def run_local_heuristics_fallback(window_title: str, active_tasks: List[TaskEnti
             animation = "nagging_mild"
             dialogue = get_dialogue("warning", task=task_title, window=window_title, sp=0.8)
             reasoning = "Deviant window matched. Deadline is far, mild nagging triggered."
-    elif is_compliant:
+    elif has_task_kw:
         status = "focused"
         d_weight = 0.0
         animation = "focus_mode_active"
         dialogue = get_dialogue("compliant", task=task_title)
-        reasoning = "Compliant window keyword matched."
+        reasoning = "Window title contains task keywords."
+    elif is_compliant_tool:
+        if is_coding_task:
+            status = "focused"
+            d_weight = 0.0
+            animation = "focus_mode_active"
+            dialogue = get_dialogue("compliant", task=task_title)
+            reasoning = "Compliant coding tool active for coding task."
+        else:
+            status = "distracted"
+            d_weight = 0.6
+            animation = "nagging_mild"
+            dialogue = get_dialogue("warning", task=task_title, window=window_title, sp=0.6)
+            reasoning = "General coding tool active for non-coding task."
     else:
         status = "neutral"
         d_weight = 0.3
@@ -389,27 +412,6 @@ def run_local_heuristics_fallback(window_title: str, active_tasks: List[TaskEnti
         reasoning=reasoning
     )
 
-# ─── Sentinel Background Loop ────────────────────────────────────
-async def cleanup_expired_tasks():
-    """Checks all active tasks, and marks those past their deadline as 'failed' (expired) in memory and ChromaDB."""
-    now = int(time.time())
-    expired_count = 0
-    for task_id, task in list(db_tasks.items()):
-        if task.status_state in ("pending", "active") and now > task.deadline_epoch:
-            # Task has expired
-            task.status_state = "failed"
-            task.resolved_at = datetime.utcnow()
-            # Update ChromaDB vector metadata
-            try:
-                if memory_db.is_ready:
-                    memory_db.embed_and_store(task.raw_source_text, task.model_dump())
-                logger.info(f"Task '{task.clean_title}' expired (past deadline) and updated in ChromaDB.")
-                expired_count += 1
-            except Exception as e:
-                logger.error(f"Failed to update expired task in ChromaDB: {e}")
-    if expired_count > 0:
-        # Broadcast state to UI since active tasks count changed
-        await manager.broadcast_state(build_companion_state())
 
 async def process_sentinel_loop():
     """
