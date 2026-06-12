@@ -8,17 +8,15 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 import mss
 from PIL import Image
+import ctypes
+from ctypes import wintypes
 
 logger = logging.getLogger("chronospet.vision")
 
-winrt_available = False
 try:
-    import winrt.windows.media.ocr as ocr
-    import winrt.windows.graphics.imaging as imaging
-    import winrt.windows.storage.streams as streams
-    winrt_available = True
-except ImportError:
-    logger.warning("winrt modules not available. Local OCR will not function.")
+    user32 = ctypes.windll.user32
+except AttributeError:
+    user32 = None
 
 class VisionResult(BaseModel):
     status: Literal["focused", "distracted", "neutral"]
@@ -48,7 +46,7 @@ vision_cache = VisionCache()
 
 def capture_screen() -> bytes:
     """
-    Captures the primary monitor screen and returns compressed JPEG bytes in memory.
+    Captures the primary monitor screen, resizes it to 640px max dimension, and returns compressed JPEG bytes in memory.
     Screenshots are never saved to disk.
     """
     with mss.mss() as sct:
@@ -58,10 +56,72 @@ def capture_screen() -> bytes:
         # Convert raw pixels from bgra format to RGB PIL Image
         img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
         
+        # Resize to max 640px to optimize VVL model VRAM footprint and execution speed
+        max_dim = 640
+        w, h = img.size
+        if w > max_dim or h > max_dim:
+            if w > h:
+                new_width = max_dim
+                new_height = int(h * (max_dim / w))
+            else:
+                new_height = max_dim
+                new_width = int(w * (max_dim / h))
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
         # Compress and save to in-memory bytes buffer
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=70)
+        img.save(buffer, format="JPEG", quality=75)
         return buffer.getvalue()
+
+def capture_window_screenshot(hwnd: int) -> bytes:
+    """
+    Captures the coordinates of a specific window handle, crops the primary monitor capture to it,
+    and resizes it to 640px max dimension to optimize memory usage and VRAM during vision model inference.
+    """
+    if not hwnd or not user32:
+        return capture_screen()
+        
+    rect = wintypes.RECT()
+    if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        left, top, right, bottom = rect.left, rect.top, rect.right, rect.bottom
+        width = right - left
+        height = bottom - top
+        
+        if width > 0 and height > 0:
+            try:
+                with mss.mss() as sct:
+                    monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                    sct_img = sct.grab(monitor)
+                    img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                    
+                    # Bounds checking relative to the captured screenshot size
+                    crop_left = max(0, min(img.width, left))
+                    crop_top = max(0, min(img.height, top))
+                    crop_right = max(0, min(img.width, right))
+                    crop_bottom = max(0, min(img.height, bottom))
+                    
+                    if crop_right > crop_left and crop_bottom > crop_top:
+                        cropped = img.crop((crop_left, crop_top, crop_right, crop_bottom))
+                        
+                        # Resize to max 640px
+                        max_dim = 640
+                        w, h = cropped.size
+                        if w > max_dim or h > max_dim:
+                            if w > h:
+                                new_width = max_dim
+                                new_height = int(h * (max_dim / w))
+                            else:
+                                new_height = max_dim
+                                new_width = int(w * (max_dim / h))
+                            cropped = cropped.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        
+                        buffer = io.BytesIO()
+                        cropped.save(buffer, format="JPEG", quality=75)
+                        return buffer.getvalue()
+            except Exception as e:
+                logger.warning(f"Failed to capture window crop for hwnd {hwnd}, using full screenshot: {e}")
+                       
+    return capture_screen()
 
 def analyze_screen(
     image_bytes: bytes,
@@ -70,7 +130,7 @@ def analyze_screen(
     llm_router
 ) -> VisionResult:
     """
-    Calls Gemini vision model via the LiteLLM router with screen context and returns a VisionResult.
+    Calls Gemini / Local Vision model via the LiteLLM router with screen context and returns a VisionResult.
     """
     if not llm_router:
         raise ValueError("LLM Router not initialized")
@@ -135,211 +195,3 @@ def analyze_screen(
     except Exception as e:
         logger.error(f"Vision analysis LLM/parsing call failed: {e}")
         raise
-
-async def analyze_screen_local_ocr(
-    image_bytes: bytes,
-    task_title: str,
-    window_title: str
-) -> VisionResult:
-    """
-    Performs Windows native local OCR on screen, then runs keyword heuristics to evaluate compliance.
-    """
-    if not winrt_available:
-        return VisionResult(
-            status="neutral",
-            d_weight=0.3,
-            activity_description="Local OCR unavailable (winrt package not installed)",
-            reasoning="WinRT dependencies are missing on this system.",
-            confidence=1.0
-        )
-        
-    try:
-        # Create InMemoryRandomAccessStream
-        stream = streams.InMemoryRandomAccessStream()
-        writer = streams.DataWriter(stream.get_output_stream_at(0))
-        writer.write_bytes(image_bytes)
-        await writer.store_async()
-        await writer.flush_async()
-        
-        stream.seek(0)
-        decoder = await imaging.BitmapDecoder.create_async(stream)
-        bitmap = await decoder.get_software_bitmap_async()
-        
-        engine = ocr.OcrEngine.try_create_from_user_profile_languages()
-        if not engine:
-            return VisionResult(
-                status="neutral",
-                d_weight=0.3,
-                activity_description="Local OCR Engine failed to initialize",
-                reasoning="Windows OcrEngine TryCreate failed.",
-                confidence=1.0
-            )
-            
-        start_time = time.time()
-        result = await engine.recognize_async(bitmap)
-        elapsed = time.time() - start_time
-        
-        ocr_text = result.text
-        logger.info(f"Local WinRT OCR completed in {elapsed:.3f}s. Text length: {len(ocr_text)} chars.")
-        
-        # Run classification heuristics
-        return evaluate_ocr_text_heuristics(ocr_text, task_title, window_title)
-        
-    except Exception as e:
-        logger.error(f"Local OCR analysis failed: {e}")
-        return VisionResult(
-            status="neutral",
-            d_weight=0.3,
-            activity_description="Local OCR failed to analyze screen",
-            reasoning=f"Error occurred during OCR: {str(e)}",
-            confidence=0.0
-        )
-
-def evaluate_ocr_text_heuristics(ocr_text: str, task_title: str, window_title: str) -> VisionResult:
-    from sentinel import (
-        DEVIANT_KEYWORDS, COMPLIANT_KEYWORDS, extract_task_keywords,
-        YT_DISTRACTION_SIGNALS, YT_FOCUSED_SIGNALS,
-        PDF_DISTRACTION_SIGNALS, PDF_FOCUSED_SIGNALS
-    )
-    
-    text_lower = ocr_text.lower()
-    win_lower = window_title.lower()
-    
-    # Extract keywords from active task
-    task_kws = extract_task_keywords(task_title)
-    task_matches = [kw for kw in task_kws if kw in text_lower]
-    
-    # Check general deviant / compliant keywords on screen
-    deviant_matches = [kw for kw in DEVIANT_KEYWORDS if kw in text_lower]
-    compliant_matches = [kw for kw in COMPLIANT_KEYWORDS if kw in text_lower]
-    
-    # ── YouTube check ──────────────────────────────────────────────
-    is_youtube = "youtube" in text_lower or "youtube" in win_lower
-    yt_focused = False
-    yt_distracted = False
-    
-    if is_youtube:
-        focused_yt_matches = [s for s in YT_FOCUSED_SIGNALS if s in text_lower]
-        distracted_yt_matches = [s for s in YT_DISTRACTION_SIGNALS if s in text_lower]
-        if focused_yt_matches:
-            yt_focused = True
-        if distracted_yt_matches:
-            yt_distracted = True
-            
-        if yt_distracted and not yt_focused:
-            return VisionResult(
-                status="distracted",
-                d_weight=0.9,
-                activity_description="Watching entertainment / deviant content on YouTube 📺",
-                reasoning="OCR matched distraction signals (e.g. gameplay, gaming, download, funny) on YouTube page.",
-                confidence=0.85
-            )
-        elif yt_focused:
-            return VisionResult(
-                status="focused",
-                d_weight=0.05,
-                activity_description="Watching educational tutorial / lecture on YouTube 📚",
-                reasoning="OCR matched learning/lecture/tutorial keywords in the YouTube video context.",
-                confidence=0.85
-            )
-        else:
-            return VisionResult(
-                status="neutral",
-                d_weight=0.5,
-                activity_description="Browsing YouTube 📺",
-                reasoning="YouTube is open but screen text contains no definitive focus or distraction signals.",
-                confidence=0.7
-            )
-
-    # ── PDF check ──────────────────────────────────────────────────
-    is_pdf = ".pdf" in win_lower or "pdf viewer" in win_lower
-    if is_pdf:
-        focused_pdf_matches = [s for s in PDF_FOCUSED_SIGNALS if s in text_lower]
-        distracted_pdf_matches = [s for s in PDF_DISTRACTION_SIGNALS if s in text_lower]
-        
-        if focused_pdf_matches:
-            return VisionResult(
-                status="focused",
-                d_weight=0.05,
-                activity_description="Reading study or work-related PDF 📖",
-                reasoning="OCR matched academic/work terms (textbook, lecture, chapter, datasheet) on the page.",
-                confidence=0.8
-            )
-        elif distracted_pdf_matches:
-            return VisionResult(
-                status="distracted",
-                d_weight=0.8,
-                activity_description="Reading non-work PDF / novel 📖",
-                reasoning="OCR matched fiction/manga/novel terms in the PDF viewer.",
-                confidence=0.8
-            )
-
-    # ── Social Media & Entertainment sites ──────────────────────────
-    social_media = ["reddit", "twitter", "x.com", "instagram", "facebook", "netflix", "twitch", "discord", "tiktok"]
-    for site in social_media:
-        if site in text_lower or site in win_lower:
-            return VisionResult(
-                status="distracted",
-                d_weight=0.85,
-                activity_description=f"Browsing {site.capitalize()} 💬",
-                reasoning=f"OCR detected '{site}' branding or page context on screen.",
-                confidence=0.9
-            )
-
-    # ── Coding / Developer tools ───────────────────────────────────
-    coding_signals = ["visual studio code", "vs code", "pycharm", "intellij", "terminal", "powershell", "cmd.exe", "github"]
-    is_coding = any(sig in text_lower or sig in win_lower for sig in coding_signals) or len(compliant_matches) >= 3
-    
-    if task_matches and (is_coding or len(compliant_matches) >= 1):
-        return VisionResult(
-            status="focused",
-            d_weight=0.0,
-            activity_description=f"Working on: {task_title} 💻",
-            reasoning=f"Active coding environment showing task-specific keywords: {', '.join(task_matches[:3])}.",
-            confidence=0.95
-        )
-    
-    if is_coding:
-        return VisionResult(
-            status="focused",
-            d_weight=0.05,
-            activity_description="Coding in developer environment 💻",
-            reasoning="OCR detected active IDE or command line terminal on screen.",
-            confidence=0.95
-        )
-
-    if task_matches:
-        return VisionResult(
-            status="focused",
-            d_weight=0.1,
-            activity_description=f"Researching / Reading content for task: {task_title}",
-            reasoning=f"Screen text contains active task keywords: {', '.join(task_matches[:3])}.",
-            confidence=0.85
-        )
-
-    # ── Default Fallback based on Keyword Density ──────────────────
-    if len(deviant_matches) > len(compliant_matches):
-        return VisionResult(
-            status="distracted",
-            d_weight=0.75,
-            activity_description="Browsing distracting content 🌐",
-            reasoning=f"OCR found deviant keywords: {', '.join(deviant_matches[:3])}.",
-            confidence=0.75
-        )
-    elif len(compliant_matches) > 0:
-        return VisionResult(
-            status="focused",
-            d_weight=0.1,
-            activity_description="Productive screen content active",
-            reasoning=f"OCR found productive terms: {', '.join(compliant_matches[:3])}.",
-            confidence=0.75
-        )
-
-    # Ambient default
-    return VisionResult(
-        status="neutral",
-        d_weight=0.3,
-        activity_description="Ambient screen activity",
-        reasoning="Screen text is general and contains no strong focus or distraction signals.",
-        confidence=0.6
-    )

@@ -16,7 +16,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+from pydantic import BaseModel
 
+import httpx
 from fastapi import (
     FastAPI, WebSocket, WebSocketDisconnect,
     HTTPException, status, File, UploadFile, Form,
@@ -28,13 +30,16 @@ from turbovec import memory_db
 from models import (
     TaskEntity, TaskUpdatePayload, WebhookPayload,
     UserConfigSchema, CompanionState, LLMParsedTask,
+    SentryTextPayload, TriageVerdictSchema, CriticEvaluationSchema,
 )
 from sentinel import (
     get_active_window_title, calculate_severity_index,
     evaluate_window_compliance, get_rich_activity_description,
-    extract_browser_context,
+    extract_browser_context, get_active_process_name_and_id,
+    get_window_structural_text,
 )
-from vision_analyzer import capture_screen, analyze_screen, analyze_screen_local_ocr, VisionResult, vision_cache
+from vision_analyzer import capture_screen, analyze_screen, VisionResult, vision_cache, capture_window_screenshot
+from agent_system import run_perception_agent, run_cognitive_agent, CognitiveResult
 from dotenv import load_dotenv
 
 # Load environment variables from the root .env file
@@ -295,112 +300,225 @@ def log_activity(window_title: str, d_weight: float, sp_score: float, task_title
 
 
 # ─── Sentinel Background Loop ────────────────────────────────────
+async def cleanup_expired_tasks():
+    """Checks all active tasks, and marks those past their deadline as 'failed' (expired) in memory and ChromaDB."""
+    now = int(time.time())
+    expired_count = 0
+    for task_id, task in list(db_tasks.items()):
+        if task.status_state in ("pending", "active") and now > task.deadline_epoch:
+            # Task has expired
+            task.status_state = "failed"
+            task.resolved_at = datetime.utcnow()
+            # Update ChromaDB vector metadata
+            try:
+                if memory_db.is_ready:
+                    memory_db.embed_and_store(task.raw_source_text, task.model_dump())
+                logger.info(f"Task '{task.clean_title}' expired (past deadline) and updated in ChromaDB.")
+                expired_count += 1
+            except Exception as e:
+                logger.error(f"Failed to update expired task in ChromaDB: {e}")
+    if expired_count > 0:
+        # Broadcast state to UI since active tasks count changed
+        await manager.broadcast_state(build_companion_state())
+
+# ─── Local Heuristic Fallback ────────────────────────────────────
+def run_local_heuristics_fallback(window_title: str, active_tasks: List[TaskEntity]) -> CognitiveResult:
+    """
+    Local heuristic fallback when the local LLM is offline.
+    Uses basic keyword matching to decide focus state, animation, and dialogue.
+    """
+    from sentinel import DEVIANT_KEYWORDS, COMPLIANT_KEYWORDS, extract_task_keywords
+    
+    active_task = active_tasks[-1] if active_tasks else None
+    if not active_task:
+        return CognitiveResult(
+            status="neutral",
+            d_weight=0.3,
+            animation="idle_loop",
+            dialogue=get_dialogue("idle"),
+            reasoning="No active task."
+        )
+        
+    title_lower = window_title.lower()
+    task_title = active_task.clean_title
+    
+    is_deviant = any(kw in title_lower for kw in DEVIANT_KEYWORDS)
+    is_youtube = "youtube" in title_lower
+    
+    # Check task keywords compliance
+    task_kws = extract_task_keywords(task_title)
+    is_compliant = any(kw in title_lower for kw in COMPLIANT_KEYWORDS) or (task_kws and any(kw in title_lower for kw in task_kws))
+    
+    if is_deviant or is_youtube:
+        # Check deadline urgency
+        now = int(time.time())
+        remaining = active_task.deadline_epoch - now
+        if remaining < 86400: # less than 24 hours
+            status = "distracted"
+            d_weight = 1.0
+            animation = "nagging_severe"
+            dialogue = get_dialogue("critical", task=task_title, window=window_title, sp=1.0)
+            reasoning = "Deviant window matched. Deadline is soon, severe nagging triggered."
+        else:
+            status = "distracted"
+            d_weight = 0.8
+            animation = "nagging_mild"
+            dialogue = get_dialogue("warning", task=task_title, window=window_title, sp=0.8)
+            reasoning = "Deviant window matched. Deadline is far, mild nagging triggered."
+    elif is_compliant:
+        status = "focused"
+        d_weight = 0.0
+        animation = "focus_mode_active"
+        dialogue = get_dialogue("compliant", task=task_title)
+        reasoning = "Compliant window keyword matched."
+    else:
+        status = "neutral"
+        d_weight = 0.3
+        animation = "idle_loop"
+        dialogue = get_dialogue("compliant", task=task_title)
+        reasoning = "Neutral window matched."
+        
+    if len(dialogue) > 60:
+        dialogue = dialogue[:57] + "..."
+        
+    return CognitiveResult(
+        status=status,
+        d_weight=d_weight,
+        animation=animation,
+        dialogue=dialogue,
+        reasoning=reasoning
+    )
+
+# ─── Sentinel Background Loop ────────────────────────────────────
+async def cleanup_expired_tasks():
+    """Checks all active tasks, and marks those past their deadline as 'failed' (expired) in memory and ChromaDB."""
+    now = int(time.time())
+    expired_count = 0
+    for task_id, task in list(db_tasks.items()):
+        if task.status_state in ("pending", "active") and now > task.deadline_epoch:
+            # Task has expired
+            task.status_state = "failed"
+            task.resolved_at = datetime.utcnow()
+            # Update ChromaDB vector metadata
+            try:
+                if memory_db.is_ready:
+                    memory_db.embed_and_store(task.raw_source_text, task.model_dump())
+                logger.info(f"Task '{task.clean_title}' expired (past deadline) and updated in ChromaDB.")
+                expired_count += 1
+            except Exception as e:
+                logger.error(f"Failed to update expired task in ChromaDB: {e}")
+    if expired_count > 0:
+        # Broadcast state to UI since active tasks count changed
+        await manager.broadcast_state(build_companion_state())
+
 async def process_sentinel_loop():
     """
-    Non-blocking polling loop (PRD Req-D.1) that runs every N seconds,
-    checks the foreground window, computes Sp, and broadcasts state to UI.
+    Non-blocking polling loop that runs every N seconds,
+    executes the multi-agent perception and cognitive supervision loop,
+    and updates UI state.
     """
     logger.info("Sentinel loop started.")
+    import ctypes
     try:
         while True:
-            # Always fetch window title at the top so it's available in all branches
+            # 0. Expired tasks cleanup
+            await cleanup_expired_tasks()
+
+            # 1. Capture system context
             window_title = get_active_window_title() or "Unknown"
+            hwnd = ctypes.windll.user32.GetForegroundWindow() if hasattr(ctypes.windll, "user32") else 0
+            process_name, process_id = get_active_process_name_and_id()
+
             active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
 
             if active_tasks:
                 current_time = int(time.time())
-
-                # Use the most recent active task
                 active_task = active_tasks[-1]
 
-                # Time calculations (PRD Section 7.1)
+                # Time calculations
                 elapsed = current_time - int(active_task.created_at.timestamp())
                 total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
+                s_prev = memory_db.register_cache.get(active_task.task_id, 0.0) if memory_db else 0.0
 
-                # If vision or local OCR is enabled, we check the cache or call analyzer
-                vision_result = None
-                if system_config.vision_enabled or system_config.ocr_enabled:
-                    vision_result = vision_cache.get(system_config.vision_min_interval_seconds)
-                    if not vision_result:
-                        try:
-                            # Capture screen first
-                            image_bytes = await asyncio.to_thread(capture_screen)
-                            
-                            if system_config.vision_enabled:
-                                # Gemini multimodal LLM analysis
-                                vision_result = await asyncio.to_thread(
-                                    analyze_screen,
-                                    image_bytes,
-                                    active_task.clean_title,
-                                    window_title,
-                                    llm_router
-                                )
-                            else:
-                                # Native local OCR analysis (runs async)
-                                vision_result = await analyze_screen_local_ocr(
-                                    image_bytes,
-                                    active_task.clean_title,
-                                    window_title
-                                )
-                            
-                            vision_cache.set(vision_result)
-                        except Exception as e:
-                            logger.warning(f"Screen context analysis failed, falling back to keyword: {e}")
+                # Capture window or screen
+                image_bytes = await asyncio.to_thread(capture_window_screenshot, hwnd)
 
-                # Deviation weight from window compliance
-                d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
-
-                # Real productivity index
-                eta = calculate_productivity_index()
-
-                # Persona-specific weights
-                alpha, beta, gamma_w = PERSONA_WEIGHTS.get(
-                    system_config.active_persona_profile, (0.4, 0.4, 0.2)
-                )
-
-                sp_score = calculate_severity_index(
-                    elapsed, total_alloc, d_weight, eta,
-                    alpha=alpha, beta=beta, gamma=gamma_w,
-                )
-
-                # Log to the dedicated ambient activity log
                 try:
-                    log_activity(window_title, d_weight, sp_score, active_task.clean_title, vision_result)
+                    # Run perception and cognitive agents
+                    activity_description = await run_perception_agent(
+                        image_bytes=image_bytes,
+                        window_title=window_title,
+                        llm_router=llm_router
+                    )
+                    cognitive_result = await run_cognitive_agent(
+                        activity_description=activity_description,
+                        active_tasks=active_tasks,
+                        persona=system_config.active_persona_profile,
+                        llm_router=llm_router
+                    )
+                except Exception as e:
+                    logger.warning(f"Sequential agent LLM calls failed, using local heuristics fallback: {e}")
+                    activity_description = f"Local analysis for: '{window_title}'"
+                    cognitive_result = run_local_heuristics_fallback(window_title, active_tasks)
+
+                # Calculate procrastination severity score
+                sp_score = calculate_severity_index(
+                    elapsed_sec=elapsed,
+                    total_allocated_sec=total_alloc,
+                    deviation_weight=cognitive_result.d_weight,
+                    task_id=active_task.task_id,
+                    s_prev=s_prev
+                )
+
+                # Store in vector DB
+                interaction_text = (
+                    f"User active in window: '{window_title}' (Process: {process_name or 'Unknown'}). "
+                    f"Activity: {activity_description}. "
+                    f"Focus Status: {cognitive_result.status}, Sp={sp_score:.2f}."
+                )
+                memory_db.embed_and_store(
+                    text=interaction_text,
+                    metadata={
+                        "task_id": active_task.task_id,
+                        "type": "interaction",
+                        "window_title": window_title,
+                        "process_name": process_name or "Unknown",
+                        "severity": sp_score,
+                        "timestamp": int(time.time())
+                    }
+                )
+
+                # Adapt for logging
+                v_res = VisionResult(
+                    status=cognitive_result.status,
+                    d_weight=cognitive_result.d_weight,
+                    activity_description=activity_description[:60],
+                    reasoning=cognitive_result.reasoning,
+                    confidence=1.0
+                )
+                try:
+                    log_activity(window_title, cognitive_result.d_weight, sp_score, active_task.clean_title, v_res)
                 except Exception as ex:
                     logger.error(f"Failed to log ambient activity: {ex}")
 
-                # State transitions per PRD Section 8.3
-                if sp_score > 0.7:
-                    state = build_companion_state(
-                        animation="nagging_severe",
-                        dialogue=get_dialogue("critical",
-                            task=active_task.clean_title,
-                            window=window_title,
-                            sp=sp_score,
-                        ),
-                        focus=max(0, 100 - int(sp_score * 100)),
-                    )
+                # Determine focus points decay / gamification focus
+                focus_cost = 0
+                if cognitive_result.animation == "nagging_severe":
+                    focus_cost = 100
+                elif cognitive_result.animation == "nagging_mild":
+                    focus_cost = 50
+
+                state = build_companion_state(
+                    animation=cognitive_result.animation,
+                    dialogue=cognitive_result.dialogue,
+                    focus=max(0, 100 - int(sp_score * focus_cost)),
+                )
+                if cognitive_result.animation == "nagging_severe":
                     logger.warning(f"STATE_CRITICAL | Sp={sp_score} | Window='{window_title}'")
-                elif sp_score > 0.4:
-                    state = build_companion_state(
-                        animation="nagging_mild",
-                        dialogue=get_dialogue("warning",
-                            task=active_task.clean_title,
-                            window=window_title,
-                            sp=sp_score,
-                        ),
-                        focus=max(0, 100 - int(sp_score * 50)),
-                    )
-                else:
-                    state = build_companion_state(
-                        animation="focus_mode_active",
-                        dialogue=get_dialogue("compliant", task=active_task.clean_title),
-                        focus=100,
-                    )
 
                 await manager.broadcast_state(state)
             else:
-                # No active tasks — log idle window + broadcast idle state
+                # No active tasks
                 try:
                     log_activity(window_title, 0.3, 0.0, "(idle — no active task)")
                 except Exception as ex:
@@ -415,7 +533,7 @@ async def process_sentinel_loop():
 
             await asyncio.sleep(system_config.polling_frequency_seconds)
     except asyncio.CancelledError:
-        logger.info("Sentinel loop terminated.")
+        logger.info("VSE Sentinel loop terminated.")
 
 
 def load_tasks_from_vector_db():
@@ -784,50 +902,84 @@ async def search_memory(q: str, top_k: int = 5):
 # ─── Debug / Observability Endpoints ─────────────────────────────
 @app.post("/api/v1/debug/sentinel-poll")
 async def force_sentinel_poll():
-    """Force an immediate sentinel window-check and activity log write. Useful for testing without waiting for the poll interval."""
+    """Force an immediate sentinel window-check and activity log write using the new multi-agent supervisor."""
     window_title = get_active_window_title() or "Unknown"
+    import ctypes
+    hwnd = ctypes.windll.user32.GetForegroundWindow() if hasattr(ctypes.windll, "user32") else 0
+    process_name, process_id = get_active_process_name_and_id()
+
     active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
 
     if active_tasks:
         active_task = active_tasks[-1]
+        image_bytes = await asyncio.to_thread(capture_window_screenshot, hwnd)
+
+        try:
+            activity_description = await run_perception_agent(
+                image_bytes=image_bytes,
+                window_title=window_title,
+                llm_router=llm_router
+            )
+            cognitive_result = await run_cognitive_agent(
+                activity_description=activity_description,
+                active_tasks=active_tasks,
+                persona=system_config.active_persona_profile,
+                llm_router=llm_router
+            )
+            llm_fallback = False
+        except Exception as e:
+            logger.warning(f"Debug sentinel poll LLM call failed, using local fallback: {e}")
+            activity_description = f"Local fallback for window: {window_title}"
+            cognitive_result = run_local_heuristics_fallback(window_title, active_tasks)
+            llm_fallback = True
+
         current_time = int(time.time())
         elapsed = current_time - int(active_task.created_at.timestamp())
         total_alloc = active_task.deadline_epoch - int(active_task.created_at.timestamp())
-        
-        # Call screen analysis if enabled
-        vision_result = None
-        if system_config.vision_enabled or system_config.ocr_enabled:
-            try:
-                image_bytes = await asyncio.to_thread(capture_screen)
-                if system_config.vision_enabled:
-                    vision_result = await asyncio.to_thread(
-                        analyze_screen,
-                        image_bytes,
-                        active_task.clean_title,
-                        window_title,
-                        llm_router
-                    )
-                else:
-                    vision_result = await analyze_screen_local_ocr(
-                        image_bytes,
-                        active_task.clean_title,
-                        window_title
-                    )
-            except Exception as e:
-                logger.warning(f"Screen poll analysis failed: {e}")
+        s_prev = memory_db.register_cache.get(active_task.task_id, 0.0) if memory_db else 0.0
 
-        d_weight = evaluate_window_compliance(window_title, active_task.clean_title, vision_result)
-        eta = calculate_productivity_index()
-        alpha, beta, gamma_w = PERSONA_WEIGHTS.get(system_config.active_persona_profile, (0.4, 0.4, 0.2))
-        sp_score = calculate_severity_index(elapsed, total_alloc, d_weight, eta, alpha=alpha, beta=beta, gamma=gamma_w)
-        log_activity(window_title, d_weight, sp_score, active_task.clean_title, vision_result)
+        sp_score = calculate_severity_index(
+            elapsed_sec=elapsed,
+            total_allocated_sec=total_alloc,
+            deviation_weight=cognitive_result.d_weight,
+            task_id=active_task.task_id,
+            s_prev=s_prev
+        )
+
+        interaction_text = (
+            f"User active in window: '{window_title}' (Process: {process_name or 'Unknown'}). "
+            f"Activity: {activity_description}. "
+            f"Focus Status: {cognitive_result.status}, Sp={sp_score:.2f}."
+        )
+        memory_db.embed_and_store(
+            text=interaction_text,
+            metadata={
+                "task_id": active_task.task_id,
+                "type": "interaction",
+                "window_title": window_title,
+                "process_name": process_name or "Unknown",
+                "severity": sp_score,
+                "timestamp": int(time.time())
+            }
+        )
+
+        v_res = VisionResult(
+            status=cognitive_result.status,
+            d_weight=cognitive_result.d_weight,
+            activity_description=activity_description[:60],
+            reasoning=cognitive_result.reasoning,
+            confidence=1.0
+        )
+        log_activity(window_title, cognitive_result.d_weight, sp_score, active_task.clean_title, v_res)
+
         return {
             "window": window_title,
             "active_task": active_task.clean_title,
-            "d_weight": d_weight,
+            "activity_description": activity_description,
+            "cognitive_result": cognitive_result.model_dump(),
             "sp_score": sp_score,
-            "vision_result": vision_result.model_dump() if vision_result else None,
-            "logged": True,
+            "llm_fallback": llm_fallback,
+            "logged": True
         }
     else:
         log_activity(window_title, 0.3, 0.0, "(idle — no active task)")
@@ -836,52 +988,31 @@ async def force_sentinel_poll():
 
 @app.get("/api/v1/debug/vision-snapshot")
 async def get_vision_snapshot():
-    """Takes a screenshot right now, runs vision analysis, and returns the raw VisionResult JSON."""
+    """Takes a screenshot right now, runs sequential Perception -> Cognitive agents, and returns the results."""
     active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
-    task_title = active_tasks[-1].clean_title if active_tasks else "No active task"
     window_title = get_active_window_title() or "Unknown"
-    
+
     try:
         image_bytes = await asyncio.to_thread(capture_screen)
-        vision_result = await asyncio.to_thread(
-            analyze_screen,
-            image_bytes,
-            task_title,
-            window_title,
-            llm_router
+        activity_description = await run_perception_agent(
+            image_bytes=image_bytes,
+            window_title=window_title,
+            llm_router=llm_router
+        )
+        cognitive_result = await run_cognitive_agent(
+            activity_description=activity_description,
+            active_tasks=active_tasks if active_tasks else [TaskEntity(clean_title="Awaiting Tasks", deadline_epoch=int(time.time())+3600)],
+            persona=system_config.active_persona_profile,
+            llm_router=llm_router
         )
         return {
             "success": True,
-            "task_title": task_title,
             "window_title": window_title,
-            "result": vision_result.model_dump()
+            "activity_description": activity_description,
+            "cognitive_result": cognitive_result.model_dump()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Vision snapshot analysis failed: {str(e)}")
-
-
-@app.get("/api/v1/debug/ocr-snapshot")
-async def get_ocr_snapshot():
-    """Takes a screenshot right now, runs local WinRT OCR, and returns the analysis."""
-    active_tasks = [t for t in db_tasks.values() if t.status_state in ("pending", "active")]
-    task_title = active_tasks[-1].clean_title if active_tasks else "No active task"
-    window_title = get_active_window_title() or "Unknown"
-    
-    try:
-        image_bytes = await asyncio.to_thread(capture_screen)
-        vision_result = await analyze_screen_local_ocr(
-            image_bytes,
-            task_title,
-            window_title
-        )
-        return {
-            "success": True,
-            "task_title": task_title,
-            "window_title": window_title,
-            "result": vision_result.model_dump()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Local OCR snapshot failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Local Vision snapshot analysis failed: {str(e)}")
 
 
 @app.get("/api/v1/debug/activity-log")
@@ -907,17 +1038,68 @@ async def process_vision_trigger(
 ):
     """
     Receives desktop image clips from the Ctrl+Shift+C hotkey.
-    Runs multimodal analysis via LLM.
+    Runs multimodal analysis via local openbmb/minicpm-v4.6 or LiteLLM Router.
     """
     logger.info(f"Vision trigger: {file.filename} | prompt: {prompt}")
 
     image_bytes = await file.read()
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
-
+    
+    # Try local Ollama vision model first if configured or if no LiteLLM router is available
+    if system_config.selected_provider == "ollama" or not llm_router:
+        try:
+            # Optimize image in-memory to reduce VRAM footprint
+            from vision_analyzer import Image
+            import io
+            img = Image.open(io.BytesIO(image_bytes))
+            max_dim = 640
+            w, h = img.size
+            if w > max_dim or h > max_dim:
+                if w > h:
+                    new_width = max_dim
+                    new_height = int(h * (max_dim / w))
+                else:
+                    new_height = max_dim
+                    new_width = int(w * (max_dim / h))
+                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=75)
+            optimized_bytes = buffer.getvalue()
+            
+            url = "http://localhost:11434/api/chat"
+            base64_image = base64.b64encode(optimized_bytes).decode("utf-8")
+            payload = {
+                "model": "openbmb/minicpm-v4.6",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                        "images": [base64_image]
+                    }
+                ],
+                "stream": False
+            }
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, timeout=15.0)
+                if response.status_code == 200:
+                    res_data = response.json()
+                    analysis = res_data["message"]["content"].strip()
+                    
+                    await manager.broadcast_state(
+                        build_companion_state(
+                            animation="vision_capture",
+                            dialogue=analysis[:200],  # Truncate for UI bubble
+                            focus=100,
+                        )
+                    )
+                    return {"analysis_success": True, "remediation_suggestion": analysis}
+        except Exception as e:
+            logger.warning(f"Local Ollama vision trigger failed: {e}")
+            
     if not llm_router:
         raise HTTPException(status_code=503, detail="LLM Router not available")
 
     try:
+        base64_image = base64.b64encode(image_bytes).decode("utf-8")
         response = llm_router.completion(
             model="chronospet-llm",
             messages=[

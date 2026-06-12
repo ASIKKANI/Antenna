@@ -30,7 +30,6 @@ class UserConfigSchema(BaseModel):
     gamification_level: int = 1
     accumulated_experience: int = 0
     vision_enabled: bool = False
-    ocr_enabled: bool = False
     vision_min_interval_seconds: int = 30
     # LLM fallback chain
     llm_fallback_models: List[str] = Field(
@@ -73,3 +72,25 @@ class LLMParsedTask(BaseModel):
         default="medium",
         description="Priority inferred from urgency keywords in the message."
     )
+
+
+# ─── VSE Screen Interpretation System Schemas ─────────────────────
+
+class SentryTextPayload(BaseModel):
+    process_name: str = Field(..., example="code.exe")
+    window_title: str = Field(..., example="main.rs - ChronosPet - VS Code")
+    accessibility_text_snippet: Optional[str] = Field(None, description="Raw UI tree text chunks")
+    active_user_task: str = Field(..., example="Implement Rust window state handling")
+
+
+class TriageVerdictSchema(BaseModel):
+    classification: Literal["COMPLIANT", "DEVIANT", "AMBIGUOUS"]
+    confidence_weight: float = Field(..., ge=0.0, le=1.0)
+    reasoning_trace: str = Field(..., description="Short internal text trace explaining selection")
+
+
+class CriticEvaluationSchema(BaseModel):
+    calculated_procrastination_score: float = Field(..., ge=0.0, le=1.0)
+    target_ui_state: str = Field(..., description="Target sprite sheet loop ID for Tauri display")
+    accompanied_text_dialogue: str = Field(..., max_length=60)
+

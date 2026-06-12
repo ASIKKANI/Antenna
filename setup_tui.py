@@ -779,18 +779,16 @@ def handle_settings():
         console.print(f"2. Companion Persona Profile:    [cyan]{config.get('active_persona_profile', 'cybernetic')}[/cyan]")
         console.print(f"3. Sentinel Polling Frequency:   [cyan]{config.get('polling_frequency_seconds', 30)} seconds[/cyan]")
         console.print(f"4. XP Awarded Per Task:          [cyan]{config.get('xp_per_task_completion', 50)} XP[/cyan]")
-        console.print(f"5. Enable Vision AI (Paid Gemini):[cyan]{'Yes' if config.get('vision_enabled', False) else 'No'}[/cyan]")
-        console.print(f"6. Enable Local OCR (Free Offline):[cyan]{'Yes' if config.get('ocr_enabled', False) else 'No'}[/cyan]")
-        console.print(f"7. Screen Analysis Min Interval: [cyan]{config.get('vision_min_interval_seconds', 30)} seconds[/cyan]")
-        console.print(f"8. Gamification Progress:        [cyan]Level {config.get('gamification_level', 1)} (XP: {config.get('accumulated_experience', 0)})[/cyan]\n")
+        console.print(f"5. Enable Vision AI (Local MiniCPM):[cyan]{'Yes' if config.get('vision_enabled', False) else 'No'}[/cyan]")
+        console.print(f"6. Screen Analysis Min Interval: [cyan]{config.get('vision_min_interval_seconds', 30)} seconds[/cyan]")
+        console.print(f"7. Gamification Progress:        [cyan]Level {config.get('gamification_level', 1)} (XP: {config.get('accumulated_experience', 0)})[/cyan]\n")
 
         choices = [
             "📞 Edit Authorized Phone Number",
             "🎭 Edit Companion Persona Profile",
             "⏱ Edit Sentinel Polling Frequency",
             "✨ Edit XP Per Task Completion",
-            "📷 Toggle Vision AI (Paid Gemini)",
-            "🔍 Toggle Local OCR (Free Offline)",
+            "📷 Toggle Vision AI (Local MiniCPM)",
             "⏱ Edit Screen Analysis Min Interval",
             "🎛 Reset Gamification Level & XP Progress",
             "🔙 Back to Main Menu"
@@ -862,29 +860,13 @@ def handle_settings():
         elif "Toggle Vision AI" in choice:
             current = config.get("vision_enabled", False)
             vision = questionary.confirm(
-                "Enable Vision AI (takes screenshots every poll cycle to analyze with Gemini)?",
+                "Enable Vision AI (takes screenshots every poll cycle to analyze with local MiniCPM)?",
                 default=current
             ).ask()
             config["vision_enabled"] = vision
-            if vision:
-                config["ocr_enabled"] = False  # Mutually exclusive
             save_config(config)
             status_str = "enabled" if vision else "disabled"
             console.print(f"[green]✔ Vision AI {status_str} successfully![/green]")
-            time.sleep(1.0)
-
-        elif "Toggle Local OCR" in choice:
-            current = config.get("ocr_enabled", False)
-            ocr = questionary.confirm(
-                "Enable Local OCR (runs Windows Media OCR locally in under 200ms, completely free & offline)?",
-                default=current
-            ).ask()
-            config["ocr_enabled"] = ocr
-            if ocr:
-                config["vision_enabled"] = False  # Mutually exclusive
-            save_config(config)
-            status_str = "enabled" if ocr else "disabled"
-            console.print(f"[green]✔ Local OCR {status_str} successfully![/green]")
             time.sleep(1.0)
 
         elif "Edit Screen Analysis Min Interval" in choice or "Edit Vision AI Min Interval" in choice:

@@ -171,3 +171,111 @@ class TestSentinelMath:
         """Unknown app → neutral weight."""
         d = evaluate_window_compliance("Calculator", "Deploy server patch")
         assert 0.1 < d < 0.5
+
+    def test_vse_get_process_name_and_id(self):
+        """VSE-01: Native Windows process lookup returns process name and ID on Windows or doesn't crash."""
+        from sentinel import get_active_process_name_and_id
+        proc_name, proc_id = get_active_process_name_and_id()
+        # On Windows, foreground should be active. On CI/headless it might be None.
+        # Ensure it runs without exception.
+        assert proc_name is None or isinstance(proc_name, str)
+        assert proc_id is None or isinstance(proc_id, int)
+
+    def test_vse_get_structural_text(self):
+        """VSE-02: Native child-window structural text tree enumerates children or returns empty string."""
+        from sentinel import get_window_structural_text
+        import ctypes
+        hwnd = ctypes.windll.user32.GetForegroundWindow() if hasattr(ctypes.windll, "user32") else 0
+        text_tree = get_window_structural_text(hwnd)
+        assert isinstance(text_tree, str)
+
+    def test_vse_severity_decay_formula(self):
+        """VSE-03: Procrastination severity score calculation uses decay formula with S_prev."""
+        # Setup: task active for 50% of allocation (time_ratio = 0.5)
+        # S_prev = 0.8, w_d = 1.0 (DEVIANT), delta = 0.85
+        # Expected Sp = 0.85 * 0.8 + 0.15 * (1.0 * 0.5) = 0.68 + 0.075 = 0.755
+        sp = calculate_severity_index(
+            elapsed_sec=500,
+            total_allocated_sec=1000,
+            deviation_weight=1.0,
+            s_prev=0.8,
+            delta=0.85,
+        )
+        assert sp == 0.755
+        
+        # Test task_id cache integration
+        from turbovec import memory_db
+        task_id = "test-vse-task-123"
+        memory_db.register_cache[task_id] = 0.5
+        
+        sp2 = calculate_severity_index(
+            elapsed_sec=300,
+            total_allocated_sec=1000,
+            deviation_weight=0.0, # COMPLIANT (w_d = 0.0)
+            task_id=task_id,
+            delta=0.85,
+        )
+        # Expected: Sp = 0.85 * 0.5 + 0.15 * (0.0 * 0.3) = 0.425
+        assert sp2 == 0.425
+        assert memory_db.register_cache[task_id] == 0.425
+
+
+# ─── VSE Multi-Agent Route Tests ─────────────────────────────────
+
+class TestVSERoutes:
+    @pytest.mark.anyio
+    async def test_perception_and_cognitive_agents(self):
+        """Verify that sequential Perception and Cognitive agents function and return parsed results."""
+        from agent_system import run_perception_agent, run_cognitive_agent, CognitiveResult
+        from unittest.mock import AsyncMock, MagicMock
+        from models import TaskEntity
+        from datetime import datetime
+
+        # Mock llm_router
+        mock_router = MagicMock()
+        
+        # 1. Mock response for Perception Agent
+        mock_response_perception = MagicMock()
+        mock_response_perception.choices = [
+            MagicMock(message=MagicMock(content="The screen shows a browser window playing a GTA V game trailer on YouTube."))
+        ]
+        
+        # 2. Mock response for Cognitive Agent
+        mock_response_cognitive = MagicMock()
+        mock_response_cognitive.choices = [
+            MagicMock(message=MagicMock(content='{"status": "distracted", "d_weight": 0.9, "animation": "nagging_severe", "dialogue": "Focus on coding!", "reasoning": "User is watching GTA V gameplay instead of writing tests"}'))
+        ]
+        
+        # Configure completion mock side_effect to return perception first, then cognitive
+        mock_router.completion.side_effect = [mock_response_perception, mock_response_cognitive]
+        
+        # Run perception agent
+        desc = await run_perception_agent(b"dummy_image", "YouTube", mock_router)
+        assert "GTA V" in desc
+        
+        # Run cognitive agent
+        tasks = [
+            TaskEntity(
+                task_id="task-123",
+                raw_source_text="Write unit tests for the agent system",
+                clean_title="Write unit tests",
+                deadline_epoch=int(time.time()) + 1800, # 30 min deadline (urgent)
+                priority_level="high",
+                status_state="active",
+                created_at=datetime.utcnow()
+            )
+        ]
+        
+        result = await run_cognitive_agent(desc, tasks, "rival", mock_router)
+        assert isinstance(result, CognitiveResult)
+        assert result.status == "distracted"
+        assert result.d_weight == 0.9
+        assert result.animation == "nagging_severe"
+        assert result.dialogue == "Focus on coding!"
+
+
+
+
+
+
+

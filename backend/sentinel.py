@@ -15,6 +15,9 @@ except AttributeError:
     user32 = None
     logger.warning("Windows user32 API not available. Window tracking will not function on this OS.")
 
+import os
+from ctypes import wintypes
+
 def get_active_window_title() -> Optional[str]:
     """Uses Windows native APIs to get the text of the foreground window (Req-D.1)."""
     if not user32:
@@ -30,18 +33,89 @@ def get_active_window_title() -> Optional[str]:
     return buff.value if buff.value else None
 
 
+def get_active_process_name_and_id() -> Tuple[Optional[str], Optional[int]]:
+    """Uses Windows native APIs to get the executable name and process ID of the active foreground window."""
+    if not user32:
+        return None, None
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return None, None
+    
+    pid = ctypes.c_ulong()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    process_id = pid.value
+    if not process_id:
+        return None, None
+        
+    # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    h_process = ctypes.windll.kernel32.OpenProcess(0x1000, False, process_id)
+    if not h_process:
+        return None, process_id
+        
+    try:
+        size = ctypes.c_ulong(1024)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if ctypes.windll.kernel32.QueryFullProcessImageNameW(h_process, 0, buf, ctypes.byref(size)):
+            full_path = buf.value
+            process_name = os.path.basename(full_path)
+            return process_name, process_id
+    except Exception as e:
+        logger.warning(f"Error querying process name for PID {process_id}: {e}")
+    finally:
+        ctypes.windll.kernel32.CloseHandle(h_process)
+        
+    return None, process_id
+
+
+def get_window_structural_text(hwnd: int) -> str:
+    """Uses Windows EnumChildWindows to construct a lightweight structural text tree of visible text elements."""
+    if not user32 or not hwnd:
+        return ""
+    
+    texts = []
+    def enum_child_proc(child_hwnd, lparam):
+        # Retrieve window class name
+        class_name = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(child_hwnd, class_name, 256)
+        
+        # Retrieve window text
+        length = user32.GetWindowTextLengthW(child_hwnd)
+        if length > 0:
+            buff = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(child_hwnd, buff, length + 1)
+            text_val = buff.value.strip()
+            if text_val:
+                texts.append(f"[{class_name.value}] {text_val}")
+        return True
+    
+    # Callback type definition
+    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    callback = WNDENUMPROC(enum_child_proc)
+    
+    # Run enumeration
+    user32.EnumChildWindows(hwnd, callback, 0)
+    
+    # Return a condensed representation (first 50 text snippets to keep it lightweight)
+    return "\n".join(texts[:50])
+
+
 def calculate_severity_index(
     elapsed_sec: int,
     total_allocated_sec: int,
     deviation_weight: float,
-    productivity_index: float,
+    productivity_index: float = 1.0,
     alpha: float = 0.4,
     beta: float = 0.4,
     gamma: float = 0.2,
+    delta: float = 0.85,
+    task_id: Optional[str] = None,
+    s_prev: Optional[float] = None,
 ) -> float:
     """
-    Procrastination Severity Index (PRD Section 7.1):
-    Sp = α*(T_elapsed / (T_deadline - T_start)) + β*D_weight + γ*(1 - η)
+    Procrastination Severity Index:
+    Uses the new historical decay formula:
+    Sp = delta * S_prev + (1 - delta) * [ w_d * (1 - T_remain/T_total) ]
+    If task_id or s_prev is not provided, defaults to compliant alpha/beta/gamma formula to preserve backward compatibility.
     """
     if total_allocated_sec <= 0:
         time_ratio = 1.0
@@ -49,8 +123,25 @@ def calculate_severity_index(
         time_ratio = min(1.0, max(0.0, elapsed_sec / total_allocated_sec))
 
     deviation_weight = min(1.0, max(0.0, deviation_weight))
-    productivity_index = min(1.0, max(0.0, productivity_index))
+    
+    # Check if we should use the new decay-based calculation (if task_id or s_prev is given)
+    if task_id is not None or s_prev is not None:
+        if s_prev is None:
+            from turbovec import memory_db
+            s_prev = memory_db.register_cache.get(task_id, 0.0) if memory_db else 0.0
+            
+        sp = delta * s_prev + (1.0 - delta) * (deviation_weight * time_ratio)
+        sp = min(1.0, max(0.0, sp))
+        
+        # Update register cache in turbovec
+        if task_id is not None:
+            from turbovec import memory_db
+            if memory_db:
+                memory_db.register_cache[task_id] = sp
+        return round(sp, 4)
 
+    # Backward compatibility with the old test suite/scoring formula
+    productivity_index = min(1.0, max(0.0, productivity_index))
     sp = (alpha * time_ratio) + (beta * deviation_weight) + (gamma * (1.0 - productivity_index))
     return round(sp, 4)
 
@@ -314,6 +405,7 @@ DEVIANT_KEYWORDS = [
     "facebook", "tiktok", "discord", "game", "steam", "epic games",
     "spotify", "hulu", "disney+", "crunchyroll", "anime",
     "cyberpunk", "elden ring", "valorant", "minecraft", "fortnite",
+    "dogma", "gameplay", "trailer", "teaser", "walkthrough", "ign",
 ]
 
 COMPLIANT_KEYWORDS = [

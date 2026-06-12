@@ -7,6 +7,16 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def patch_authorized_phone():
+    """Ensure system authorized phone matches the test payload regardless of local config.json."""
+    from main import system_config
+    original = system_config.authorized_phone_number
+    system_config.authorized_phone_number = "919876543210"
+    yield
+    system_config.authorized_phone_number = original
+
+
 @pytest.fixture
 def mock_llm_router():
     """Mock the LiteLLM Router to return structured task JSON."""
