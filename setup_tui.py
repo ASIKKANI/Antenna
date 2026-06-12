@@ -1319,6 +1319,144 @@ def handle_activity_view():
             console.print(f"[bold red]Failed to read activity log: {e}[/bold red]\n")
             questionary.press_any_key_to_continue().ask()
 
+# ─── Ollama Local Model Manager ───────────────────────────────────
+def check_ollama_running() -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://localhost:11434/", timeout=1.0) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+def get_ollama_installed_models() -> list:
+    import urllib.request
+    import json
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1.0) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode("utf-8"))
+                return [model["name"] for model in data.get("models", [])]
+    except Exception:
+        pass
+    return []
+
+def get_ollama_loaded_models() -> list:
+    import urllib.request
+    import json
+    try:
+        with urllib.request.urlopen("http://localhost:11434/api/ps", timeout=1.0) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode("utf-8"))
+                return [model["name"] for model in data.get("models", [])]
+    except Exception:
+        pass
+    return []
+
+def load_ollama_model(model_name: str) -> bool:
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=json.dumps({"model": model_name, "stream": False}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            return response.status == 200
+    except Exception as e:
+        console.print(f"[bold red]Failed to load model: {e}[/bold red]")
+        return False
+
+def unload_ollama_model(model_name: str) -> bool:
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.Request(
+            "http://localhost:11434/api/generate",
+            data=json.dumps({"model": model_name, "prompt": "", "keep_alive": 0, "stream": False}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=10.0) as response:
+            return response.status == 200
+    except Exception as e:
+        console.print(f"[bold red]Failed to unload model: {e}[/bold red]")
+        return False
+
+def handle_ollama_manager():
+    while True:
+        clear_terminal()
+        print_banner()
+        console.print("[bold yellow]🦙 Ollama Local Model Manager[/bold yellow]\n")
+
+        is_running = check_ollama_running()
+        status_text = "[green]RUNNING[/green]" if is_running else "[red]OFFLINE[/red]"
+        console.print(f"Ollama Service Status: {status_text}")
+        console.print("Endpoint:              [cyan]http://localhost:11434[/cyan]\n")
+
+        if not is_running:
+            console.print("[yellow]Ollama service is not running locally.[/yellow]")
+            console.print("Please make sure you have started the Ollama application or service first.\n")
+            choices = ["🔄 Retry Connection", "🔙 Back to Main Menu"]
+            choice = questionary.select("Select action:", choices=choices).ask()
+            if not choice or "Back to Main Menu" in choice:
+                break
+            continue
+
+        installed = get_ollama_installed_models()
+        loaded = get_ollama_loaded_models()
+
+        table = Table(title="Ollama Local Models Status")
+        table.add_column("Model Name", style="cyan")
+        table.add_column("Status", style="bold")
+        table.add_column("Memory State", style="magenta")
+
+        for model in installed:
+            is_loaded = any(model in l_mod or l_mod in model for l_mod in loaded)
+            state_text = "[green]LOADED (In VRAM)[/green]" if is_loaded else "[dim]UNLOADED (On Disk)[/dim]"
+            action_status = "[bold green]Ready[/bold green]"
+            table.add_row(model, action_status, state_text)
+
+        console.print(table)
+        console.print("\n")
+
+        choices = []
+        for model in installed:
+            is_loaded = any(model in l_mod or l_mod in model for l_mod in loaded)
+            action = "🛑 Unload (Stop)" if is_loaded else "🚀 Load (Start)"
+            choices.append(f"{action} {model}")
+
+        choices.append("🔙 Back to Main Menu")
+
+        choice = questionary.select(
+            "Select action:",
+            choices=choices
+        ).ask()
+
+        if not choice or "Back to Main Menu" in choice:
+            break
+
+        selected_model = None
+        is_load = "Load (Start)" in choice
+
+        for model in installed:
+            if model in choice:
+                selected_model = model
+                break
+
+        if selected_model:
+            if is_load:
+                console.print(f"[cyan]Loading model '{selected_model}' into VRAM...[/cyan]")
+                if load_ollama_model(selected_model):
+                    console.print(f"[green]✔ Model '{selected_model}' loaded successfully![/green]")
+                time.sleep(1.5)
+            else:
+                console.print(f"[cyan]Unloading model '{selected_model}' from memory...[/cyan]")
+                if unload_ollama_model(selected_model):
+                    console.print(f"[green]✔ Model '{selected_model}' unloaded from memory.[/green]")
+                time.sleep(1.5)
+
 # ─── Main Program ─────────────────────────────────────────────────
 def main():
     while True:
@@ -1329,6 +1467,7 @@ def main():
             "Select setup category:",
             choices=[
                 "🖥️ Universal Process Control Panel",
+                "🦙 Ollama Local Model Manager",
                 "📦 View ChromaDB Task Store",
                 "🔍 View Ambient Activity Logs",
                 "📱 Link WhatsApp Gateway",
@@ -1345,6 +1484,8 @@ def main():
             break
         elif "Process Control" in choice:
             handle_process_control()
+        elif "Ollama Local Model Manager" in choice:
+            handle_ollama_manager()
         elif "View ChromaDB" in choice:
             handle_chromadb_view()
         elif "View Ambient Activity" in choice:
